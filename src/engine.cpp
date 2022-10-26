@@ -2,6 +2,7 @@
 #include <vk_mem_alloc.h>
 
 #include "engine.hpp"
+#include "meshtools.hpp"
 
 static std::vector<char> readFile(const std::string& filename) {
     std::ifstream file(filename, std::ios::ate | std::ios::binary);
@@ -33,7 +34,29 @@ vk::ShaderModule setupShader(const std::vector<char>& shader, vk::Device& gpudev
 	return module;
 }
 
-bool Mesh::Load() {
+bool Mesh::Load(const char* path) {
+	MeshTools::MeshData loading_mesh;
+	loading_mesh.load_from_file(path);
+
+	vertices.resize(loading_mesh.indices.size());
+	for (int index : loading_mesh.indices) {
+		MeshTools::MeshVertex* lm_v = &loading_mesh.vertices[index];
+		vertices[index].pos = {lm_v->pos[0],lm_v->pos[1],lm_v->pos[2]};
+	}
+
+	//vertices.resize(3);
+	//vertices[0].pos = {0.0f, 0.0f, 0.0f};
+	//vertices[1].pos = {0.0f, 0.5f, 0.0f};
+	//vertices[2].pos = {0.5f, 0.0f, 0.0f};
+
+	//glm::mat4 projection = glm::perspective(glm::radians(70.f), 1700.f / 900.f, 0.1f, 200.0f);
+	//projection[1][1] *= -1;
+
+	//vertices[0].pos *= projection;
+	//vertices[1].pos *= projection;
+	//vertices[2].pos *=	projection;
+
+   // test.load_from_file("assets/cube.obj");
 
 	return true;
 }
@@ -427,10 +450,11 @@ void MainEngine::CreateGraphicsPipeline() {
 void MainEngine::initial() {
 	testmesh = new Mesh();
 
-	testmesh->vertices.resize(3);
-	testmesh->vertices[0].pos = {0.0f, 0.0f, 0.0f};
-	testmesh->vertices[1].pos = {0.0f, 0.5f, 0.0f};
-	testmesh->vertices[2].pos = {0.5f, 0.0f, 0.0f};
+	testmesh->Load("assets/cube.obj");
+	//testmesh->vertices.resize(3);
+	//testmesh->vertices[0].pos = {0.0f, 0.0f, 0.0f};
+	//testmesh->vertices[1].pos = {0.0f, 0.5f, 0.0f};
+	//testmesh->vertices[2].pos = {0.5f, 0.0f, 0.0f};
 
 	upload_mesh(testmesh);
 }
@@ -515,10 +539,10 @@ void MainEngine::draw() {
 	tick = (tick + 0.001f);
 	if (tick>3.14159268) tick = 0;
 
-	float sine = sin(tick);
+	//float sine = sin(tick);
 
 	vk::ClearValue clearcol{};
-	clearcol.color = vk::ClearColorValue(std::array<float, 4>({{0.1f, sine, 0.1f, 1.0f}}));
+	clearcol.color = vk::ClearColorValue(std::array<float, 4>({{0.1f, 0.1f, 0.1f, 1.0f}}));
 
 	vk::Rect2D renderrect;
 	renderrect.extent = swapchainExtent;
@@ -545,7 +569,7 @@ void MainEngine::draw() {
 	
 	vk::DeviceSize offset = 0;
 	commandbuffer_current->bindVertexBuffers(0,1,&testmesh->vertexBuffer.buffer,&offset);
-	commandbuffer_current->draw(3,1,0,0);
+	commandbuffer_current->draw(testmesh->vertices.size(),1,0,0);
 
 	commandbuffer_current->endRenderPass();
 	commandbuffer_current->end();

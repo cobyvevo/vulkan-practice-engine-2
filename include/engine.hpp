@@ -52,7 +52,7 @@ struct Mesh {
 	std::vector<Vertex> vertices;
 	AllocatedBuffer vertexBuffer;
 	//VertInputStateDesc meshInputState;
-	bool Load();
+	bool Load(const char* path);
 };
 
 class MainEngine {

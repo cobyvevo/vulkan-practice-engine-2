@@ -14,12 +14,17 @@
 #include <fstream>
 
 #include "engine.hpp"
+#include "meshtools.hpp"
 
 int main() {
-    
     MainEngine engine(300,300);
+    //MeshTools::MeshData test;
+   // test.load_from_file("assets/cube.obj");
 
     std::cout << "ended" << std::endl;
+
+   // [[maybe_unused]] int x;
+   // std::cin >> x;
 
     return EXIT_SUCCESS;
 
