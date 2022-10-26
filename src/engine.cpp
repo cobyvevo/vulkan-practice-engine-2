@@ -22,6 +22,13 @@ static std::vector<char> readFile(const std::string& filename) {
     return buffer;
 }
 
+size_t pad_uniform_buffer_size(size_t original, size_t minUboAlignment) {
+	if (minUboAlignment > 0) {
+		return (original + minUboAlignment - 1) & ~(minUboAlignment - 1);
+	}
+	return original;
+}//vkguide.dev
+
 vk::ShaderModule setupShader(const std::vector<char>& shader, vk::Device& gpudevice) {
 	vk::ShaderModuleCreateInfo createinfo(
 		{},
@@ -39,10 +46,15 @@ bool Mesh::Load(const char* path) {
 	loading_mesh.load_from_file(path);
 
 	vertices.resize(loading_mesh.indices.size());
+	int count = 0;
 	for (int index : loading_mesh.indices) {
 		MeshTools::MeshVertex* lm_v = &loading_mesh.vertices[index];
-		vertices[index].pos = {lm_v->pos[0],lm_v->pos[1],lm_v->pos[2]};
+		vertices[count].pos = {lm_v->pos[0],lm_v->pos[1],lm_v->pos[2]};
+		std::cout << lm_v->pos[0] << ", " << lm_v->pos[1] << ", " << lm_v->pos[2] << std::endl;
+		count++;
 	}
+
+
 
 	//vertices.resize(3);
 	//vertices[0].pos = {0.0f, 0.0f, 0.0f};
@@ -99,6 +111,10 @@ AllocatedBuffer MainEngine::create_allocated_buffer(size_t allocSize, vk::Flags<
 	}
 
 	return newbuffer;
+}
+
+void MainEngine::destroy_allocated_buffer(AllocatedBuffer* abuffer) {
+	vmaDestroyBuffer(vallocator, abuffer->buffer, abuffer->allocation);
 }
 
 void MainEngine::CreateAllocator() {
@@ -304,6 +320,73 @@ void MainEngine::CreateCommandpool() {
 
 }
 
+void MainEngine::CreateDescriptorSets() {
+
+	//make pool
+
+	std::vector<vk::DescriptorPoolSize> sizes = {
+		{vk::DescriptorType::eUniformBuffer, 10},
+	};
+
+	vk::DescriptorPoolCreateInfo poolInfo{};
+	poolInfo.maxSets = 10;
+	poolInfo.poolSizeCount = (uint32_t)sizes.size();
+	poolInfo.pPoolSizes = sizes.data();
+	descriptorPool = core->gpudevice.createDescriptorPool(poolInfo);
+
+	//create bindings
+
+	vk::DescriptorSetLayoutBinding cameraBufferBinding{};
+	cameraBufferBinding.binding = 0;
+	cameraBufferBinding.descriptorCount = 1;
+	cameraBufferBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
+	cameraBufferBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+
+	vk::DescriptorSetLayoutCreateInfo setinfo{};
+	setinfo.bindingCount = 1;
+	setinfo.pBindings = &cameraBufferBinding;
+
+	descriptorSetLayout = core->gpudevice.createDescriptorSetLayout(setinfo);
+
+	frames.resize(frameFlightNum);
+
+	for (uint32_t i = 0; i < frameFlightNum; i++) {
+
+		frames[i].cameraBuffer = create_allocated_buffer(
+			sizeof(WorldData),
+			vk::BufferUsageFlagBits::eUniformBuffer,
+			VMA_MEMORY_USAGE_CPU_TO_GPU
+		);
+
+		//allocate
+
+		vk::DescriptorSetAllocateInfo allocateinfo{};
+		allocateinfo.descriptorPool = descriptorPool;
+		allocateinfo.descriptorSetCount = 1;
+		allocateinfo.pSetLayouts = &descriptorSetLayout;
+
+		frames[i].descriptor = core->gpudevice.allocateDescriptorSets(allocateinfo).front();
+
+		//write allocation
+
+		vk::DescriptorBufferInfo camerabufferinfo{};
+		camerabufferinfo.buffer = frames[i].cameraBuffer.buffer;
+		camerabufferinfo.offset = 0;
+		camerabufferinfo.range = sizeof(WorldData);
+
+		vk::WriteDescriptorSet camerawrite{};
+		camerawrite.dstSet = frames[i].descriptor;
+		camerawrite.dstBinding = 0;
+		camerawrite.descriptorCount = 1;
+		camerawrite.descriptorType = vk::DescriptorType::eUniformBuffer;
+		camerawrite.pBufferInfo = &camerabufferinfo;
+
+		//update allocation
+		core->gpudevice.updateDescriptorSets(1,&camerawrite,0,nullptr);	
+	}
+
+}
+
 void MainEngine::CreateSyncObjects() {
 
 	vk::SemaphoreCreateInfo seminfo{};
@@ -329,8 +412,9 @@ void MainEngine::CreateGraphicsPipeline() {
 	vk::PipelineLayoutCreateInfo defaultinfo{};
 	defaultinfo.pPushConstantRanges = nullptr;
 	defaultinfo.pushConstantRangeCount = 0;
-	defaultinfo.setLayoutCount = 0;
-	defaultinfo.pSetLayouts = nullptr;
+	defaultinfo.setLayoutCount = 1;
+	defaultinfo.pSetLayouts = &descriptorSetLayout;
+
 	defaultPipelineLayout = core->gpudevice.createPipelineLayout(defaultinfo);
 
 	//setup shaders
@@ -518,6 +602,26 @@ bool MainEngine::upload_mesh(Mesh* target) {
 
 }
 
+static void WindowResizedCallback(GLFWwindow* win, int w, int h) {
+	auto eng = reinterpret_cast<MainEngine*>(glfwGetWindowUserPointer(win));
+	eng->windowResized = false;
+}
+
+void MainEngine::ReCreateSwapchain() {
+
+	vk::Result res = core->gpudevice.waitForFences(frameFlightNum, render_fences.data(), true, UINT32_MAX);
+
+    for (auto thing : swapchainImageViews) { //lol
+    	core->gpudevice.destroyImageView(thing, nullptr);
+    }
+ 	for (auto thing : swapchainFramebuffer) {
+    	core->gpudevice.destroyFramebuffer(thing, nullptr);
+    }
+
+    CreateSwapchain();
+    CreateFramebuffer();
+
+}
 
 void MainEngine::draw() {
 
@@ -528,16 +632,49 @@ void MainEngine::draw() {
 	[[maybe_unused]] vk::Result res;//bruh
 	
 	res = core->gpudevice.waitForFences(1,&fence,true,UINT64_MAX);
-
 	uint32_t next_swap_image = 0; 
 	res = core->gpudevice.acquireNextImageKHR(swapchain, UINT64_MAX, swapchainavailable_S, VK_NULL_HANDLE, &next_swap_image);
+	
+	//resizing
+	if (res == vk::Result::eErrorOutOfDateKHR || res == vk::Result::eSuboptimalKHR || windowResized == false) {
+		windowResized = true;
+		ReCreateSwapchain();
+		return;
+	} else if (res != vk::Result::eSuccess) {
+		throw std::runtime_error("swapchain died lol");
+	}
+
 	res = core->gpudevice.resetFences(1, &fence);	
 
 	vk::CommandBuffer* commandbuffer_current = &cmdBuffers[currentFlight];
 	commandbuffer_current->reset();
 
+	//running cool code before draw
+	FrameInfo currentframe = frames[currentFlight];
 	tick = (tick + 0.001f);
 	if (tick>3.14159268) tick = 0;
+
+	WorldData newworlddata;
+
+	glm::vec3 campos = {0.0f,0.0f,-5.0f};
+	glm::vec3 center = {0.0f,0.0f,0.0f};
+	glm::mat4 defaultmat = glm::mat4(1.f);
+
+	glm::mat4 rotatemat = glm::rotate(defaultmat,tick*2, glm::vec3(0,1,0));
+	glm::mat4 view = glm::translate(rotatemat, center);
+
+	glm::mat4 offsetview = glm::translate(defaultmat,campos);
+
+	glm::mat4 projection = glm::perspective(glm::radians(70.f), 1700.f / 900.f, 0.1f, 200.0f);
+	projection[1][1] *= -1;
+
+	newworlddata.viewproj = projection * (offsetview*view);
+
+	void* data;
+	vmaMapMemory(vallocator, currentframe.cameraBuffer.allocation, &data);
+	memcpy(data, &newworlddata, sizeof(WorldData));
+	vmaUnmapMemory(vallocator, currentframe.cameraBuffer.allocation);
+
 
 	//float sine = sin(tick);
 
@@ -566,7 +703,15 @@ void MainEngine::draw() {
 	commandbuffer_current->setScissor(0, 1, &renderrect);
 	//vk::Rect2D scissorrect = renderrect;
 	commandbuffer_current->bindPipeline(vk::PipelineBindPoint::eGraphics,graphicsPipeline);
-	
+	commandbuffer_current->bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics,
+		defaultPipelineLayout,
+		0,1,
+		&currentframe.descriptor,
+		0,
+		nullptr
+	);
+
 	vk::DeviceSize offset = 0;
 	commandbuffer_current->bindVertexBuffers(0,1,&testmesh->vertexBuffer.buffer,&offset);
 	commandbuffer_current->draw(testmesh->vertices.size(),1,0,0);
@@ -619,6 +764,7 @@ void MainEngine::cleanup() {
     	core->gpudevice.destroySemaphore(swapimageavailable_semaphores[i], nullptr);
 		core->gpudevice.destroySemaphore(rendersubmit_semaphores[i], nullptr);
 		core->gpudevice.destroyFence(render_fences[i], nullptr);
+		destroy_allocated_buffer(&frames[i].cameraBuffer);	
     }
 
     core->gpudevice.destroyFence(uploadFence, nullptr);
@@ -627,10 +773,14 @@ void MainEngine::cleanup() {
     core->gpudevice.destroyCommandPool(cmdPool, nullptr);
     core->gpudevice.destroyRenderPass(renderpass, nullptr);
 
+    core->gpudevice.destroyDescriptorPool(descriptorPool, nullptr);
+	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout, nullptr);
+	
     core->gpudevice.destroyPipelineLayout(defaultPipelineLayout, nullptr);
     core->gpudevice.destroyPipeline(graphicsPipeline, nullptr);
 
-	vmaDestroyBuffer(vallocator, testmesh->vertexBuffer.buffer, testmesh->vertexBuffer.allocation);
+	//vmaDestroyBuffer(vallocator, testmesh->vertexBuffer.buffer, testmesh->vertexBuffer.allocation);
+   	destroy_allocated_buffer(&testmesh->vertexBuffer);
     vmaDestroyAllocator(vallocator);
 
     core->cleanup();
@@ -638,14 +788,18 @@ void MainEngine::cleanup() {
 
 MainEngine::MainEngine(uint32_t WIDTH, uint32_t HEIGHT){
 	std::cout << "making engine" << std::endl;
+
 	core = new VulkanCore(WIDTH,HEIGHT);
 	queueFamilies = &core->queueFamilies;
+	glfwSetWindowUserPointer(core->window,this);
+	glfwSetFramebufferSizeCallback(core->window,WindowResizedCallback);
 
 	CreateAllocator();
 	CreateSwapchain();
 	CreateRenderpass();
 	CreateFramebuffer();
 	CreateCommandpool();
+	CreateDescriptorSets();
 	CreateSyncObjects();
 
 	CreateGraphicsPipeline();

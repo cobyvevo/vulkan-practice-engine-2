@@ -55,6 +55,15 @@ struct Mesh {
 	bool Load(const char* path);
 };
 
+struct WorldData {
+	glm::mat4 viewproj;
+};
+
+struct FrameInfo {
+	AllocatedBuffer cameraBuffer;
+	vk::DescriptorSet descriptor;
+};
+
 class MainEngine {
 private:	
 	VulkanCore* core;	
@@ -91,11 +100,16 @@ private:
 	//ALLOCATOR
 	VmaAllocator vallocator;
 
+	//DESCRIPTOR SETS
+	vk::DescriptorPool descriptorPool;
+	vk::DescriptorSetLayout descriptorSetLayout;
+
 	//MISC
 	Mesh* testmesh;
-
+	std::vector<FrameInfo> frames;
 
 public:
+	bool windowResized = false;
 	uint32_t frameFlightNum = 3;
 	uint32_t currentFlight = 0;
 	float tick = 0;
@@ -108,11 +122,14 @@ public:
 	void CreateRenderpass();
 	void CreateFramebuffer();
 	void CreateCommandpool();
+	void CreateDescriptorSets();
 	void CreateSyncObjects();
-
 	void CreateGraphicsPipeline();
 
+	void ReCreateSwapchain();
+
 	AllocatedBuffer create_allocated_buffer(size_t allocSize, vk::Flags<vk::BufferUsageFlagBits> usageBits, VmaMemoryUsage memoryUsageFlag);
+	void destroy_allocated_buffer(AllocatedBuffer* buffer);
 
 	void run_gpu_instruction(std::function<void(vk::CommandBuffer cmd)>&& function);
 	bool upload_mesh(Mesh* target);
