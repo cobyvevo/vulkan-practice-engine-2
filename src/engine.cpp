@@ -467,7 +467,7 @@ void MainEngine::CreateGraphicsPipeline() {
 	rasterizer.lineWidth = 1.0f;
 	//
 
-	//coor blending
+	//coLor blending
 	vk::PipelineColorBlendAttachmentState colorattachmentstate{};
 	colorattachmentstate.blendEnable = true;
 	colorattachmentstate.srcColorBlendFactor = vk::BlendFactor::eSrcAlpha; //alpha
