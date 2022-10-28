@@ -48,6 +48,13 @@ struct AllocatedBuffer {
 	VmaAllocation allocation;
 };
 
+struct AllocatedImage {
+	vk::Image image;
+	bool ImageViewExists = false;
+	vk::ImageView imageview;
+	VmaAllocation allocation;
+};
+
 struct Mesh {
 	std::vector<Vertex> vertices;
 	AllocatedBuffer vertexBuffer;
@@ -104,6 +111,10 @@ private:
 	vk::DescriptorPool descriptorPool;
 	vk::DescriptorSetLayout descriptorSetLayout;
 
+	//DEPTH BUFFER
+	vk::Format depthFormat;
+	AllocatedImage depthImage;
+
 	//MISC
 	Mesh* testmesh;
 	std::vector<FrameInfo> frames;
@@ -130,6 +141,9 @@ public:
 
 	AllocatedBuffer create_allocated_buffer(size_t allocSize, vk::Flags<vk::BufferUsageFlagBits> usageBits, VmaMemoryUsage memoryUsageFlag);
 	void destroy_allocated_buffer(AllocatedBuffer* buffer);
+
+	AllocatedImage create_allocated_image(vk::Format format, vk::ImageUsageFlagBits imageusage, vk::Extent3D extent, VmaMemoryUsage memoryUsageFlag, bool create_an_imageview, vk::ImageAspectFlagBits imageaspect);
+	void destroy_allocated_image(AllocatedImage* image);
 
 	void run_gpu_instruction(std::function<void(vk::CommandBuffer cmd)>&& function);
 	bool upload_mesh(Mesh* target);

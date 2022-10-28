@@ -117,6 +117,61 @@ void MainEngine::destroy_allocated_buffer(AllocatedBuffer* abuffer) {
 	vmaDestroyBuffer(vallocator, abuffer->buffer, abuffer->allocation);
 }
 
+AllocatedImage MainEngine::create_allocated_image(vk::Format format, vk::ImageUsageFlagBits imageusage, vk::Extent3D extent, VmaMemoryUsage memoryUsageFlag, bool create_an_imageview, vk::ImageAspectFlagBits imageaspect) {
+
+	vk::ImageCreateInfo image{};
+	image.imageType = vk::ImageType::e2D;
+	image.format = format;
+	image.extent = extent;
+	image.mipLevels = 1;
+	image.arrayLayers = 1;
+	image.samples = vk::SampleCountFlagBits::e1;
+	image.tiling = vk::ImageTiling::eOptimal;
+	image.usage = imageusage;
+
+	VmaAllocationCreateInfo allocationinfo{};
+	allocationinfo.usage = memoryUsageFlag;
+	allocationinfo.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	AllocatedImage newallocimage;
+
+	if (vmaCreateImage(
+		vallocator, 
+		reinterpret_cast<VkImageCreateInfo*>(&image), 
+		&allocationinfo,
+		reinterpret_cast<VkImage*>(&newallocimage.image),
+		&newallocimage.allocation,
+		nullptr
+		) != VK_SUCCESS) {
+		throw std::runtime_error("image failed to be allocated");
+	}
+
+	if (create_an_imageview == true) {
+		newallocimage.ImageViewExists = true;
+		vk::ImageViewCreateInfo imgview{};
+
+		imgview.image = newallocimage.image;
+		imgview.viewType = vk::ImageViewType::e2D;
+		imgview.format = format;
+
+		imgview.subresourceRange.aspectMask = imageaspect;//vk::ImageAspectFlagBits::eColor;
+		imgview.subresourceRange.baseMipLevel = 0;
+		imgview.subresourceRange.levelCount = 1;
+		imgview.subresourceRange.baseArrayLayer = 0;
+		imgview.subresourceRange.layerCount = 1;	
+
+		newallocimage.imageview = core->gpudevice.createImageView(imgview);
+	}
+
+	return newallocimage;
+
+}
+
+void MainEngine::destroy_allocated_image(AllocatedImage* aimage) {
+	if (aimage->ImageViewExists==true) core->gpudevice.destroyImageView(aimage->imageview,nullptr);
+	vmaDestroyImage(vallocator, static_cast<VkImage>(aimage->image), aimage->allocation);
+}
+
 void MainEngine::CreateAllocator() {
 	VmaAllocatorCreateInfo allocatorInfo{};
 	allocatorInfo.physicalDevice = core->gpu;
@@ -216,6 +271,20 @@ void MainEngine::CreateSwapchain() {
 
 	}
 
+	//make depth
+	depthFormat = vk::Format::eD32Sfloat;
+
+	vk::Extent3D depthImgExtent = {swapchainExtent.width,swapchainExtent.height,1};
+	
+	depthImage = create_allocated_image(
+		depthFormat, 
+		vk::ImageUsageFlagBits::eDepthStencilAttachment, 
+		depthImgExtent, 
+		VMA_MEMORY_USAGE_GPU_ONLY, 
+		true, 
+		vk::ImageAspectFlagBits::eDepth
+	);
+
 }
 
 void MainEngine::CreateRenderpass() {
@@ -237,11 +306,28 @@ void MainEngine::CreateRenderpass() {
 	colorRef.layout = vk::ImageLayout::eColorAttachmentOptimal;
 	//
 
+	//depth
+	vk::AttachmentDescription depthAttachment{};
+	depthAttachment.format = depthFormat;
+	depthAttachment.samples = vk::SampleCountFlagBits::e1;
+	depthAttachment.loadOp = vk::AttachmentLoadOp::eClear;
+	depthAttachment.storeOp = vk::AttachmentStoreOp::eStore;
+	depthAttachment.stencilLoadOp = vk::AttachmentLoadOp::eClear;
+	depthAttachment.stencilStoreOp = vk::AttachmentStoreOp::eDontCare;
+	depthAttachment.initialLayout = vk::ImageLayout::eUndefined;
+	depthAttachment.finalLayout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+	
+	vk::AttachmentReference depthRef{};
+	depthRef.attachment = 1;
+	depthRef.layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+	//
+
 	//subpass
 	vk::SubpassDescription mainsubpass{};
 	mainsubpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
 	mainsubpass.colorAttachmentCount = 1;
 	mainsubpass.pColorAttachments = &colorRef;
+	mainsubpass.pDepthStencilAttachment = &depthRef;
 
 	vk::SubpassDependency mainsubpassDependency{};
 	mainsubpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL; //everything before the render pass
@@ -250,16 +336,27 @@ void MainEngine::CreateRenderpass() {
 	mainsubpassDependency.dstStageMask = vk::PipelineStageFlagBits::eColorAttachmentOutput; //once it finishes, run my color output
 	mainsubpassDependency.srcAccessMask = {}; //src has no memory access types 
 	mainsubpassDependency.dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite; //im going to be writing to a color attachment
+	
+	vk::SubpassDependency depthsubpassDependency{};
+	depthsubpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL; //everything before the render pass
+	depthsubpassDependency.dstSubpass = 0;
+	depthsubpassDependency.srcStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests;
+	depthsubpassDependency.dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests; 
+	depthsubpassDependency.srcAccessMask = {};
+	depthsubpassDependency.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite; 
 	//
+
+	vk::AttachmentDescription passAttachments[2] = {colorAttachment,depthAttachment};
+	vk::SubpassDependency passDependencies[2] = {mainsubpassDependency,depthsubpassDependency};
 
 	vk::RenderPassCreateInfo renderpassInfo{};
 	renderpassInfo.flags = {};
-	renderpassInfo.attachmentCount = 1;
-	renderpassInfo.pAttachments = &colorAttachment;
+	renderpassInfo.attachmentCount = 2;
+	renderpassInfo.pAttachments = &passAttachments[0];
 	renderpassInfo.subpassCount = 1;
 	renderpassInfo.pSubpasses = &mainsubpass;
-	renderpassInfo.dependencyCount = 1;
-	renderpassInfo.pDependencies = &mainsubpassDependency;
+	renderpassInfo.dependencyCount = 2;
+	renderpassInfo.pDependencies = &passDependencies[0];
 
 	renderpass = core->gpudevice.createRenderPass(renderpassInfo);
 	std::cout << "rendeprass" << std::endl;
@@ -272,10 +369,12 @@ void MainEngine::CreateFramebuffer() {
 
 	for (size_t i = 0; i < swapchainImageViews.size(); i++) {
 
+		vk::ImageView imageview_attachments[2] = {swapchainImageViews[i],depthImage.imageview};
+
 		vk::FramebufferCreateInfo fbinfo{};
 		fbinfo.renderPass = renderpass;
-		fbinfo.attachmentCount = 1;
-		fbinfo.pAttachments = &swapchainImageViews[i];
+		fbinfo.attachmentCount = 2;
+		fbinfo.pAttachments = imageview_attachments;
 		fbinfo.width = swapchainExtent.width;
 		fbinfo.height = swapchainExtent.height;
 		fbinfo.layers = 1;
@@ -488,7 +587,6 @@ void MainEngine::CreateGraphicsPipeline() {
 	multisample.rasterizationSamples = vk::SampleCountFlagBits::e1;
 
 	//vertex input
-
 	VertInputStateDesc defaultdesc;
 	defaultdesc.GetDefaultState();
 
@@ -498,7 +596,15 @@ void MainEngine::CreateGraphicsPipeline() {
 
 	vertexInputStateInfo.pVertexBindingDescriptions = defaultdesc.bindings.data();
 	vertexInputStateInfo.pVertexAttributeDescriptions = defaultdesc.attributes.data();
+	//
 
+	//depth stencil
+	vk::PipelineDepthStencilStateCreateInfo depthstencil{};
+	depthstencil.depthTestEnable = true;
+	depthstencil.depthWriteEnable = true;
+	depthstencil.depthCompareOp = vk::CompareOp::eLessOrEqual;
+	depthstencil.depthBoundsTestEnable = false;
+	depthstencil.stencilTestEnable = false;
 	//
 	
 	vk::GraphicsPipelineCreateInfo graphicsinfo{};
@@ -512,7 +618,7 @@ void MainEngine::CreateGraphicsPipeline() {
 	graphicsinfo.pViewportState = &viewportState;
 	graphicsinfo.pRasterizationState = &rasterizer;
 	graphicsinfo.pMultisampleState = &multisample;
-	graphicsinfo.pDepthStencilState = nullptr;
+	graphicsinfo.pDepthStencilState = &depthstencil;
 	graphicsinfo.pColorBlendState = &colorBlendState;
 	graphicsinfo.pDynamicState = &dynamicState;
 	graphicsinfo.layout = defaultPipelineLayout;
@@ -618,6 +724,8 @@ void MainEngine::ReCreateSwapchain() {
     	core->gpudevice.destroyFramebuffer(thing, nullptr);
     }
 
+    destroy_allocated_image(&depthImage);
+
     CreateSwapchain();
     CreateFramebuffer();
 
@@ -681,6 +789,11 @@ void MainEngine::draw() {
 	vk::ClearValue clearcol{};
 	clearcol.color = vk::ClearColorValue(std::array<float, 4>({{0.1f, 0.1f, 0.1f, 1.0f}}));
 
+	vk::ClearValue depthclearcol{};
+	depthclearcol.depthStencil.depth = 1.0f;
+
+	vk::ClearValue clearvalues[2] = {clearcol,depthclearcol};
+
 	vk::Rect2D renderrect;
 	renderrect.extent = swapchainExtent;
 
@@ -689,8 +802,8 @@ void MainEngine::draw() {
 	begininfo.renderPass = renderpass;
 	begininfo.framebuffer = swapchainFramebuffer[next_swap_image];
 	begininfo.renderArea = renderrect;
-	begininfo.clearValueCount = 1;
-	begininfo.pClearValues = &clearcol;
+	begininfo.clearValueCount = 2;
+	begininfo.pClearValues = &clearvalues[0];
 
 	commandbuffer_current->begin(commandbegininfo);
 	commandbuffer_current->beginRenderPass(begininfo, vk::SubpassContents::eInline);
@@ -750,6 +863,7 @@ void MainEngine::draw() {
 
 void MainEngine::cleanup() {
 	core->gpudevice.waitIdle();
+	destroy_allocated_image(&depthImage);
 
     core->gpudevice.destroySwapchainKHR(swapchain, nullptr);
 
