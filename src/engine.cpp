@@ -79,6 +79,10 @@ bool Mesh::Load(const char* path) {
 	return true;
 }
 
+void Object::Setup(const char* mesh_path, const char* texture_path) {
+	
+}
+
 void VertInputStateDesc::GetDefaultState() {
 	vk::VertexInputBindingDescription mainBinding{};
 	mainBinding.binding = 0;
@@ -587,6 +591,7 @@ void MainEngine::CreateDescriptorSets() {
 
 	std::vector<vk::DescriptorPoolSize> sizes = {
 		{vk::DescriptorType::eUniformBuffer, 10},
+		{vk::DescriptorType::eStorageBuffer, 10},
 		{vk::DescriptorType::eCombinedImageSampler, 10},
 	};
 
@@ -608,6 +613,18 @@ void MainEngine::CreateDescriptorSets() {
 	setinfo.bindingCount = 1;
 	setinfo.pBindings = &cameraBufferBinding;
 
+	//object data
+
+	vk::DescriptorSetLayoutBinding objectdataBufferBinding{};
+	objectdataBufferBinding.binding = 0;
+	objectdataBufferBinding.descriptorCount = 1;
+	objectdataBufferBinding.descriptorType = vk::DescriptorType::eStorageBuffer;
+	objectdataBufferBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
+
+	vk::DescriptorSetLayoutCreateInfo setinfo_objectdata{};
+	setinfo_objectdata.bindingCount = 1;
+	setinfo_objectdata.pBindings = &objectdataBufferBinding;	
+
 	//texture
 
 	vk::DescriptorSetLayoutBinding textureBufferBinding{};
@@ -621,6 +638,7 @@ void MainEngine::CreateDescriptorSets() {
 	setinfo_texture.pBindings = &textureBufferBinding;
 
 	descriptorSetLayout = core->gpudevice.createDescriptorSetLayout(setinfo);
+	descriptorSetLayout_objectdata = core->gpudevice.createDescriptorSetLayout(setinfo_objectdata);
 	descriptorSetLayout_texture = core->gpudevice.createDescriptorSetLayout(setinfo_texture);
 
 	frames.resize(frameFlightNum);
@@ -630,11 +648,18 @@ void MainEngine::CreateDescriptorSets() {
 		frames[i].cameraBuffer = create_allocated_buffer(
 			sizeof(WorldData),
 			vk::BufferUsageFlagBits::eUniformBuffer,
-			VMA_MEMORY_USAGE_CPU_TO_GPU
+			VMA_MEMORY_USAGE_CPU_TO_GPU //change this
+		);
+
+		frames[i].objectdataBuffer = create_allocated_buffer(
+			sizeof(GPUObjectData),
+			vk::BufferUsageFlagBits::eStorageBuffer,
+			VMA_MEMORY_USAGE_CPU_TO_GPU //also this
 		);
 
 		//allocate
 
+		//cam
 		vk::DescriptorSetAllocateInfo allocateinfo{};
 		allocateinfo.descriptorPool = descriptorPool;
 		allocateinfo.descriptorSetCount = 1;
@@ -642,8 +667,17 @@ void MainEngine::CreateDescriptorSets() {
 
 		frames[i].descriptor = core->gpudevice.allocateDescriptorSets(allocateinfo).front();
 
+		//obj
+		vk::DescriptorSetAllocateInfo allocateinfo_obj{};
+		allocateinfo_obj.descriptorPool = descriptorPool;
+		allocateinfo_obj.descriptorSetCount = 1;
+		allocateinfo_obj.pSetLayouts = &descriptorSetLayout_objectdata;
+
+		frames[i].objectdescriptor = core->gpudevice.allocateDescriptorSets(allocateinfo_obj).front();
+
 		//write allocation
 
+		//cam
 		vk::DescriptorBufferInfo camerabufferinfo{};
 		camerabufferinfo.buffer = frames[i].cameraBuffer.buffer;
 		camerabufferinfo.offset = 0;
@@ -656,8 +690,22 @@ void MainEngine::CreateDescriptorSets() {
 		camerawrite.descriptorType = vk::DescriptorType::eUniformBuffer;
 		camerawrite.pBufferInfo = &camerabufferinfo;
 
+		//obj
+		vk::DescriptorBufferInfo objectbufferinfo{};
+		objectbufferinfo.buffer = frames[i].objectdataBuffer.buffer;
+		objectbufferinfo.offset = 0;
+		objectbufferinfo.range = sizeof(GPUObjectData);
+
+		vk::WriteDescriptorSet objectbufferwrite{};
+		objectbufferwrite.dstSet = frames[i].objectdescriptor;
+		objectbufferwrite.dstBinding = 0;
+		objectbufferwrite.descriptorCount = 1;
+		objectbufferwrite.descriptorType = vk::DescriptorType::eStorageBuffer;
+		objectbufferwrite.pBufferInfo = &objectbufferinfo;
+
 		//update allocation
 		core->gpudevice.updateDescriptorSets(1,&camerawrite,0,nullptr);	
+		core->gpudevice.updateDescriptorSets(1,&objectbufferwrite,0,nullptr);	
 	}
 
 }
@@ -684,12 +732,12 @@ void MainEngine::CreateSyncObjects() {
 
 void MainEngine::CreateGraphicsPipeline() {
 
-	vk::DescriptorSetLayout dslayouts[] = {descriptorSetLayout,descriptorSetLayout_texture};
+	vk::DescriptorSetLayout dslayouts[] = {descriptorSetLayout,descriptorSetLayout_texture,descriptorSetLayout_objectdata};
 
 	vk::PipelineLayoutCreateInfo defaultinfo{};
 	defaultinfo.pPushConstantRanges = nullptr;
 	defaultinfo.pushConstantRangeCount = 0;
-	defaultinfo.setLayoutCount = 2;
+	defaultinfo.setLayoutCount = 3;
 	defaultinfo.pSetLayouts = dslayouts;
 
 	defaultPipelineLayout = core->gpudevice.createPipelineLayout(defaultinfo);
@@ -971,6 +1019,15 @@ void MainEngine::draw() {
 	vmaUnmapMemory(vallocator, currentframe.cameraBuffer.allocation);
 
 
+	GPUObjectData newobjectdata;
+	glm::vec3 objcenter = {sin(tick*4) * 10.0f,0.0f,0.0f};
+	newobjectdata.transform = glm::translate(glm::mat4(1.f), objcenter);
+
+	void* objectdata;
+	vmaMapMemory(vallocator, currentframe.objectdataBuffer.allocation, &objectdata);
+	memcpy(objectdata, &newobjectdata, sizeof(GPUObjectData));
+	vmaUnmapMemory(vallocator, currentframe.objectdataBuffer.allocation);
+
 	//float sine = sin(tick);
 
 	vk::ClearValue clearcol{};
@@ -1010,6 +1067,15 @@ void MainEngine::draw() {
 		defaultPipelineLayout,
 		0,1,
 		&currentframe.descriptor,
+		0,
+		nullptr
+	);
+	
+	commandbuffer_current->bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics,
+		defaultPipelineLayout,
+		2,1,
+		&currentframe.objectdescriptor,
 		0,
 		nullptr
 	);
@@ -1090,6 +1156,7 @@ void MainEngine::cleanup() {
 
     core->gpudevice.destroyDescriptorPool(descriptorPool, nullptr);
 	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout, nullptr);
+	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout_objectdata, nullptr);
 	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout_texture, nullptr);
 	
     core->gpudevice.destroyPipelineLayout(defaultPipelineLayout, nullptr);

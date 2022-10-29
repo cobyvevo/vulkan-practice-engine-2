@@ -10,6 +10,10 @@ layout(set = 0, binding = 0) uniform CameraBuffer{
 	mat4 viewproj;
 } Camera;
 
+layout(set = 2, binding = 0) uniform ObjectBuffer{
+	mat4 transform;
+} Object;
+
 vec2 positions[3] = vec2[](
 	vec2(0,-0.3),
 	vec2(0.25,0.34),
@@ -46,7 +50,11 @@ vec3 cols[24] = vec3[]( //jesus christ
 void main() {
 	//gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
 
-	gl_Position = Camera.viewproj * vec4(vPos,1.0);
+	gl_Position = Camera.viewproj * (Object.transform*vec4(vPos,1.0));
+
+
+	//gl_Position = Camera.viewproj * (vec4(vPos,1.0));
+
 	fragColor = vec3(0.5,0.5,0.5);//cols[gl_VertexIndex];
 	uvCoord = vUV;
 }

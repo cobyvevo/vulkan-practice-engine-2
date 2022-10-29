@@ -28,6 +28,8 @@
 
 #include "vulkancore.hpp"
 
+
+//INTERNAL
 struct VertInputStateDesc {
 	std::vector<vk::VertexInputBindingDescription> bindings;
 	std::vector<vk::VertexInputAttributeDescription> attributes;
@@ -69,13 +71,33 @@ struct Texture {
 	vk::Sampler sampler;
 };
 
+struct GPUObjectData {
+	glm::mat4 transform;
+};
+
 struct WorldData {
 	glm::mat4 viewproj;
 };
 
 struct FrameInfo {
 	AllocatedBuffer cameraBuffer;
+	AllocatedBuffer objectdataBuffer;
 	vk::DescriptorSet descriptor;
+	vk::DescriptorSet objectdescriptor;
+};
+//EXTERNAL ABSTRACTIONS
+
+struct Material {
+	Texture tex;
+	vk::Pipeline* gpupipeline;
+};
+
+struct Object {
+	Mesh mesh;
+	Material mat;
+	glm::mat4 transform;
+
+	void Setup(const char* mesh_path, const char* texture_path);
 };
 
 class MainEngine {
@@ -115,8 +137,10 @@ private:
 	VmaAllocator vallocator;
 
 	//DESCRIPTOR SETS
+
 	vk::DescriptorPool descriptorPool;
 	vk::DescriptorSetLayout descriptorSetLayout;
+	vk::DescriptorSetLayout descriptorSetLayout_objectdata;
 	vk::DescriptorSetLayout descriptorSetLayout_texture;
 
 	//DEPTH BUFFER
