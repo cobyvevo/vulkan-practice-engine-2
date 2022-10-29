@@ -38,8 +38,9 @@ struct VertInputStateDesc {
 
 struct Vertex {
 	glm::vec3 pos;
+	glm::vec2 uv;
 	bool operator==(const Vertex& other) const {
-		return other.pos==pos;
+		return (other.pos==pos && other.uv==uv);
 	}
 };
 
@@ -60,6 +61,12 @@ struct Mesh {
 	AllocatedBuffer vertexBuffer;
 	//VertInputStateDesc meshInputState;
 	bool Load(const char* path);
+};
+
+struct Texture {
+	AllocatedImage image;
+	vk::DescriptorSet descriptor;
+	vk::Sampler sampler;
 };
 
 struct WorldData {
@@ -110,6 +117,7 @@ private:
 	//DESCRIPTOR SETS
 	vk::DescriptorPool descriptorPool;
 	vk::DescriptorSetLayout descriptorSetLayout;
+	vk::DescriptorSetLayout descriptorSetLayout_texture;
 
 	//DEPTH BUFFER
 	vk::Format depthFormat;
@@ -117,6 +125,9 @@ private:
 
 	//MISC
 	Mesh* testmesh;
+	AllocatedImage testimage;
+	Texture testtexture;
+
 	std::vector<FrameInfo> frames;
 
 public:
@@ -142,10 +153,16 @@ public:
 	AllocatedBuffer create_allocated_buffer(size_t allocSize, vk::Flags<vk::BufferUsageFlagBits> usageBits, VmaMemoryUsage memoryUsageFlag);
 	void destroy_allocated_buffer(AllocatedBuffer* buffer);
 
-	AllocatedImage create_allocated_image(vk::Format format, vk::ImageUsageFlagBits imageusage, vk::Extent3D extent, VmaMemoryUsage memoryUsageFlag, bool create_an_imageview, vk::ImageAspectFlagBits imageaspect);
+	AllocatedImage create_allocated_image(vk::Format format, vk::Flags<vk::ImageUsageFlagBits> imageusage, vk::Extent3D extent, VmaMemoryUsage memoryUsageFlag, bool create_an_imageview, vk::ImageAspectFlagBits imageaspect);
 	void destroy_allocated_image(AllocatedImage* image);
 
 	void run_gpu_instruction(std::function<void(vk::CommandBuffer cmd)>&& function);
+
+	AllocatedImage load_texture_file(const char* file);
+
+	Texture create_texture_from_allimage(AllocatedImage* target);
+	void destroy_texture(Texture* target);
+
 	bool upload_mesh(Mesh* target);
 
 	void initial();

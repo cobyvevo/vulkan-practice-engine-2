@@ -245,7 +245,8 @@ VulkanCore::VulkanCore(uint32_t WIDTH, uint32_t HEIGHT) {
 }
 
 void VulkanCore::GetNewSwapchain() {
-	swapchainDetails = getSwapchainDetails(&gpu, &surface);
+	//swapchainDetails = getSwapchainDetails(&gpu, &surface);
+	swapchainDetails.capabilities = gpu.getSurfaceCapabilitiesKHR(surface.get());
 }
 
 void VulkanCore::cleanup() {

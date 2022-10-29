@@ -1,5 +1,8 @@
 #define VMA_IMPLEMENTATION
+#define STB_IMAGE_IMPLEMENTATION
+
 #include <vk_mem_alloc.h>
+#include <stb_image.h>
 
 #include "engine.hpp"
 #include "meshtools.hpp"
@@ -49,14 +52,17 @@ bool Mesh::Load(const char* path) {
 	int count = 0;
 	for (int index : loading_mesh.indices) {
 		MeshTools::MeshVertex* lm_v = &loading_mesh.vertices[index];
+
 		vertices[count].pos = {lm_v->pos[0],lm_v->pos[1],lm_v->pos[2]};
+		vertices[count].uv = {lm_v->uv[0],1-lm_v->uv[1]};
+
 		std::cout << lm_v->pos[0] << ", " << lm_v->pos[1] << ", " << lm_v->pos[2] << std::endl;
 		count++;
 	}
 
 
 
-	//vertices.resize(3);
+	//vertices.resize(3)
 	//vertices[0].pos = {0.0f, 0.0f, 0.0f};
 	//vertices[1].pos = {0.0f, 0.5f, 0.0f};
 	//vertices[2].pos = {0.5f, 0.0f, 0.0f};
@@ -85,8 +91,15 @@ void VertInputStateDesc::GetDefaultState() {
 	posAtt.format = vk::Format::eR32G32B32Sfloat;
 	posAtt.offset = offsetof(Vertex,pos);
 
+	vk::VertexInputAttributeDescription uvAtt{};
+	uvAtt.binding = 0;
+	uvAtt.location = 1;
+	uvAtt.format = vk::Format::eR32G32Sfloat;
+	uvAtt.offset = offsetof(Vertex,uv);
+
 	bindings.push_back(mainBinding);
 	attributes.push_back(posAtt);
+	attributes.push_back(uvAtt);
 }
 
 AllocatedBuffer MainEngine::create_allocated_buffer(size_t allocSize, vk::Flags<vk::BufferUsageFlagBits> usageBits, VmaMemoryUsage memoryUsageFlag) {
@@ -117,7 +130,7 @@ void MainEngine::destroy_allocated_buffer(AllocatedBuffer* abuffer) {
 	vmaDestroyBuffer(vallocator, abuffer->buffer, abuffer->allocation);
 }
 
-AllocatedImage MainEngine::create_allocated_image(vk::Format format, vk::ImageUsageFlagBits imageusage, vk::Extent3D extent, VmaMemoryUsage memoryUsageFlag, bool create_an_imageview, vk::ImageAspectFlagBits imageaspect) {
+AllocatedImage MainEngine::create_allocated_image(vk::Format format, vk::Flags<vk::ImageUsageFlagBits> imageusage, vk::Extent3D extent, VmaMemoryUsage memoryUsageFlag, bool create_an_imageview, vk::ImageAspectFlagBits imageaspect = vk::ImageAspectFlagBits::eDepth) {
 
 	vk::ImageCreateInfo image{};
 	image.imageType = vk::ImageType::e2D;
@@ -168,8 +181,157 @@ AllocatedImage MainEngine::create_allocated_image(vk::Format format, vk::ImageUs
 }
 
 void MainEngine::destroy_allocated_image(AllocatedImage* aimage) {
-	if (aimage->ImageViewExists==true) core->gpudevice.destroyImageView(aimage->imageview,nullptr);
+	if (aimage->ImageViewExists==true) {
+		core->gpudevice.destroyImageView(aimage->imageview,nullptr);
+	}
 	vmaDestroyImage(vallocator, static_cast<VkImage>(aimage->image), aimage->allocation);
+}
+
+AllocatedImage MainEngine::load_texture_file(const char* file) {
+
+	int texture_width, texture_height, texture_channels;
+
+	stbi_uc* pixels = stbi_load(file, &texture_width, &texture_height, &texture_channels, STBI_rgb_alpha);
+	if (!pixels) {
+		std::cout << "image failed to be loaded in" << std::endl;	
+		//make a default missing texture and then return it here
+	}
+
+	vk::DeviceSize texturesize = texture_width * texture_height * 4;
+	vk::Format textureformat = vk::Format::eB8G8R8A8Srgb;
+
+	AllocatedBuffer stagingbuffer = create_allocated_buffer(
+		texturesize,
+		vk::BufferUsageFlagBits::eTransferSrc,
+		VMA_MEMORY_USAGE_CPU_ONLY
+	);
+
+	void* data;
+	void* pixelvoid = pixels;
+	vmaMapMemory(vallocator,stagingbuffer.allocation,&data);
+	memcpy(data, pixelvoid, static_cast<size_t>(texturesize));
+	vmaUnmapMemory(vallocator,stagingbuffer.allocation);
+
+	stbi_image_free(pixels);
+
+	vk::Extent3D textureExtent;
+	textureExtent.width = static_cast<uint32_t>(texture_width);
+	textureExtent.height = static_cast<uint32_t>(texture_height);
+	textureExtent.depth = 1;
+
+	AllocatedImage newtexture = create_allocated_image(
+		textureformat, 
+		vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst, 
+		textureExtent, 
+		VMA_MEMORY_USAGE_GPU_ONLY, 
+		true,
+		vk::ImageAspectFlagBits::eColor
+	);
+
+	run_gpu_instruction([=](vk::CommandBuffer cmd) {
+		
+		vk::ImageSubresourceRange range;
+		range.aspectMask = vk::ImageAspectFlagBits::eColor;
+		range.baseMipLevel = 0;
+		range.levelCount = 1;
+		range.baseArrayLayer = 0;
+		range.layerCount = 1;
+
+		vk::ImageMemoryBarrier transfer_barrier{};
+		transfer_barrier.oldLayout = vk::ImageLayout::eUndefined;
+		transfer_barrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
+		transfer_barrier.image = newtexture.image;
+		transfer_barrier.subresourceRange = range;
+		transfer_barrier.dstAccessMask = vk::AccessFlagBits::eTransferWrite;
+
+		cmd.pipelineBarrier(
+			vk::PipelineStageFlagBits::eTopOfPipe,
+			vk::PipelineStageFlagBits::eTransfer,
+			{},
+			0,
+			nullptr,
+			0,
+			nullptr,
+			1,
+			&transfer_barrier
+		);
+
+		vk::BufferImageCopy imagebuffer_copy{};
+		imagebuffer_copy.bufferOffset = 0;
+		imagebuffer_copy.bufferRowLength = 0;
+		imagebuffer_copy.bufferImageHeight = 0;
+		imagebuffer_copy.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+		imagebuffer_copy.imageSubresource.mipLevel = 0;
+		imagebuffer_copy.imageSubresource.baseArrayLayer = 0;
+		imagebuffer_copy.imageSubresource.layerCount = 1;
+		imagebuffer_copy.imageExtent = textureExtent;
+
+		cmd.copyBufferToImage(stagingbuffer.buffer, newtexture.image, vk::ImageLayout::eTransferDstOptimal, 1, &imagebuffer_copy);
+
+		vk::ImageMemoryBarrier transfer_barrier_readable{};
+		transfer_barrier_readable.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+		transfer_barrier_readable.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+		transfer_barrier_readable.image = newtexture.image;
+		transfer_barrier_readable.subresourceRange = range;
+		transfer_barrier_readable.srcAccessMask = vk::AccessFlagBits::eTransferWrite;
+		transfer_barrier_readable.dstAccessMask = vk::AccessFlagBits::eShaderRead;
+
+		cmd.pipelineBarrier(
+			vk::PipelineStageFlagBits::eTransfer,
+			vk::PipelineStageFlagBits::eFragmentShader,
+			{},
+			0,
+			nullptr,
+			0,
+			nullptr,
+			1,
+			&transfer_barrier_readable
+		);
+
+	});
+	
+	destroy_allocated_buffer(&stagingbuffer);
+
+	return newtexture;
+}
+
+Texture MainEngine::create_texture_from_allimage(AllocatedImage* target) {
+	Texture tex;
+
+	vk::DescriptorSetAllocateInfo allocinfo{};
+	allocinfo.descriptorPool = descriptorPool;
+	allocinfo.descriptorSetCount = 1;
+	allocinfo.pSetLayouts = &descriptorSetLayout_texture; //image sampler layout
+	tex.descriptor = core->gpudevice.allocateDescriptorSets(allocinfo).front();
+
+	vk::SamplerCreateInfo sampler{};
+	sampler.magFilter = vk::Filter::eNearest;
+	sampler.minFilter = vk::Filter::eNearest;
+	//sampler.addressModeU = vk::SamplerAddressMode::eRepeat;
+	//sampler.addressModeV = vk::SamplerAddressMode::eRepeat;	
+	//sampler.addressModeW = vk::SamplerAddressMode::eRepeat;
+
+	tex.sampler = core->gpudevice.createSampler(sampler);
+
+	vk::DescriptorImageInfo imageInfo{};
+	imageInfo.sampler = tex.sampler;
+	imageInfo.imageView = target->imageview;
+	imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+	vk::WriteDescriptorSet write{};
+	write.dstBinding = 0;
+	write.descriptorCount = 1;
+	write.dstSet = tex.descriptor;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.pImageInfo = &imageInfo;
+
+	core->gpudevice.updateDescriptorSets(1,&write,0,nullptr);
+
+	return tex;
+}
+
+void MainEngine::destroy_texture(Texture* target) {
+	core->gpudevice.destroySampler(target->sampler, nullptr);
 }
 
 void MainEngine::CreateAllocator() {
@@ -240,10 +402,10 @@ void MainEngine::CreateSwapchain() {
 	swapCreateInfo.oldSwapchain = nullptr;
 
 	swapchain = core->gpudevice.createSwapchainKHR(swapCreateInfo);
-	std::cout << "the chain" << std::endl;
+	//std::cout << "the chain" << std::endl;
 
 	swapchainImages = core->gpudevice.getSwapchainImagesKHR(swapchain);
-	std::cout << "the chain imagres" << std::endl;
+	//std::cout << "the chain imagres" << std::endl;
 
 	swapchainImageViews.resize(swapchainImages.size());
 
@@ -267,7 +429,7 @@ void MainEngine::CreateSwapchain() {
 		imgview.subresourceRange.layerCount = 1;
 
 		swapchainImageViews[i] = core->gpudevice.createImageView(imgview);
-		std::cout << "imgview" << i << std::endl;
+		//std::cout << "imgview" << i << std::endl;
 
 	}
 
@@ -380,7 +542,7 @@ void MainEngine::CreateFramebuffer() {
 		fbinfo.layers = 1;
 
 		swapchainFramebuffer[i] = core->gpudevice.createFramebuffer(fbinfo);
-		std::cout << "made framebuffer" << i << std::endl;
+		//std::cout << "made framebuffer" << i << std::endl;
 
 	}
 
@@ -425,6 +587,7 @@ void MainEngine::CreateDescriptorSets() {
 
 	std::vector<vk::DescriptorPoolSize> sizes = {
 		{vk::DescriptorType::eUniformBuffer, 10},
+		{vk::DescriptorType::eCombinedImageSampler, 10},
 	};
 
 	vk::DescriptorPoolCreateInfo poolInfo{};
@@ -445,7 +608,20 @@ void MainEngine::CreateDescriptorSets() {
 	setinfo.bindingCount = 1;
 	setinfo.pBindings = &cameraBufferBinding;
 
+	//texture
+
+	vk::DescriptorSetLayoutBinding textureBufferBinding{};
+	textureBufferBinding.binding = 0;
+	textureBufferBinding.descriptorCount = 1;
+	textureBufferBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	textureBufferBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+	vk::DescriptorSetLayoutCreateInfo setinfo_texture{};
+	setinfo_texture.bindingCount = 1;
+	setinfo_texture.pBindings = &textureBufferBinding;
+
 	descriptorSetLayout = core->gpudevice.createDescriptorSetLayout(setinfo);
+	descriptorSetLayout_texture = core->gpudevice.createDescriptorSetLayout(setinfo_texture);
 
 	frames.resize(frameFlightNum);
 
@@ -508,11 +684,13 @@ void MainEngine::CreateSyncObjects() {
 
 void MainEngine::CreateGraphicsPipeline() {
 
+	vk::DescriptorSetLayout dslayouts[] = {descriptorSetLayout,descriptorSetLayout_texture};
+
 	vk::PipelineLayoutCreateInfo defaultinfo{};
 	defaultinfo.pPushConstantRanges = nullptr;
 	defaultinfo.pushConstantRangeCount = 0;
-	defaultinfo.setLayoutCount = 1;
-	defaultinfo.pSetLayouts = &descriptorSetLayout;
+	defaultinfo.setLayoutCount = 2;
+	defaultinfo.pSetLayouts = dslayouts;
 
 	defaultPipelineLayout = core->gpudevice.createPipelineLayout(defaultinfo);
 
@@ -521,6 +699,7 @@ void MainEngine::CreateGraphicsPipeline() {
 	auto fragFile = readFile("shaders/frag.spv");
 	//vert
 	vk::ShaderModule vertexShader = setupShader(vertexFile,core->gpudevice);
+
 	vk::PipelineShaderStageCreateInfo vertInfo{};
 	vertInfo.stage = vk::ShaderStageFlagBits::eVertex;
 	vertInfo.module = vertexShader;
@@ -591,8 +770,8 @@ void MainEngine::CreateGraphicsPipeline() {
 	defaultdesc.GetDefaultState();
 
 	vk::PipelineVertexInputStateCreateInfo vertexInputStateInfo{};
-	vertexInputStateInfo.vertexBindingDescriptionCount = 1;
-	vertexInputStateInfo.vertexAttributeDescriptionCount = 1;
+	vertexInputStateInfo.vertexBindingDescriptionCount = defaultdesc.bindings.size();
+	vertexInputStateInfo.vertexAttributeDescriptionCount = defaultdesc.attributes.size();
 
 	vertexInputStateInfo.pVertexBindingDescriptions = defaultdesc.bindings.data();
 	vertexInputStateInfo.pVertexAttributeDescriptions = defaultdesc.attributes.data();
@@ -604,6 +783,10 @@ void MainEngine::CreateGraphicsPipeline() {
 	depthstencil.depthWriteEnable = true;
 	depthstencil.depthCompareOp = vk::CompareOp::eLessOrEqual;
 	depthstencil.depthBoundsTestEnable = false;
+	//basically you can check if an incoming fragment/pixels depth is inbetween 2 given values
+	//if they arent, you can discard them. i guess this is good for lighting
+	//since you can just completely disregard things that are not within the vicinity of a 
+	//light source
 	depthstencil.stencilTestEnable = false;
 	//
 	
@@ -639,8 +822,9 @@ void MainEngine::CreateGraphicsPipeline() {
 
 void MainEngine::initial() {
 	testmesh = new Mesh();
-
-	testmesh->Load("assets/cube.obj");
+	testmesh->Load("assets/testasset.obj");
+	testimage = load_texture_file("assets/tex.png");
+	testtexture = create_texture_from_allimage(&testimage);
 	//testmesh->vertices.resize(3);
 	//testmesh->vertices[0].pos = {0.0f, 0.0f, 0.0f};
 	//testmesh->vertices[1].pos = {0.0f, 0.5f, 0.0f};
@@ -700,7 +884,7 @@ bool MainEngine::upload_mesh(Mesh* target) {
 		cmd.copyBuffer(stagingbuffer.buffer, target->vertexBuffer.buffer, 1, &vertexbuffer_copy);
 	});
 
-	vmaDestroyBuffer(vallocator, stagingbuffer.buffer, stagingbuffer.allocation);
+	destroy_allocated_buffer(&stagingbuffer);
 
 	std::cout << "uploaded testmesh" <<std::endl;
 
@@ -715,7 +899,8 @@ static void WindowResizedCallback(GLFWwindow* win, int w, int h) {
 
 void MainEngine::ReCreateSwapchain() {
 
-	vk::Result res = core->gpudevice.waitForFences(frameFlightNum, render_fences.data(), true, UINT32_MAX);
+	core->gpudevice.waitIdle();
+	//vk::Result res = core->gpudevice.waitForFences(frameFlightNum, render_fences.data(), true, UINT32_MAX);
 
     for (auto thing : swapchainImageViews) { //lol
     	core->gpudevice.destroyImageView(thing, nullptr);
@@ -723,6 +908,8 @@ void MainEngine::ReCreateSwapchain() {
  	for (auto thing : swapchainFramebuffer) {
     	core->gpudevice.destroyFramebuffer(thing, nullptr);
     }
+
+    core->gpudevice.destroySwapchainKHR(swapchain, nullptr);
 
     destroy_allocated_image(&depthImage);
 
@@ -759,12 +946,12 @@ void MainEngine::draw() {
 
 	//running cool code before draw
 	FrameInfo currentframe = frames[currentFlight];
-	tick = (tick + 0.001f);
+	tick = (tick + 0.0001f);
 	if (tick>3.14159268) tick = 0;
 
 	WorldData newworlddata;
 
-	glm::vec3 campos = {0.0f,0.0f,-5.0f};
+	glm::vec3 campos = {0.0f,-2.0f,-10.0f};
 	glm::vec3 center = {0.0f,0.0f,0.0f};
 	glm::mat4 defaultmat = glm::mat4(1.f);
 
@@ -816,11 +1003,22 @@ void MainEngine::draw() {
 	commandbuffer_current->setScissor(0, 1, &renderrect);
 	//vk::Rect2D scissorrect = renderrect;
 	commandbuffer_current->bindPipeline(vk::PipelineBindPoint::eGraphics,graphicsPipeline);
+
+	//vk::DescriptorSet dsets[] = {testtexture.descriptor};
 	commandbuffer_current->bindDescriptorSets(
 		vk::PipelineBindPoint::eGraphics,
 		defaultPipelineLayout,
 		0,1,
 		&currentframe.descriptor,
+		0,
+		nullptr
+	);
+
+	commandbuffer_current->bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics,
+		defaultPipelineLayout,
+		1,1,
+		&testtexture.descriptor,
 		0,
 		nullptr
 	);
@@ -863,7 +1061,10 @@ void MainEngine::draw() {
 
 void MainEngine::cleanup() {
 	core->gpudevice.waitIdle();
+
 	destroy_allocated_image(&depthImage);
+	destroy_allocated_image(&testimage);
+	destroy_texture(&testtexture);
 
     core->gpudevice.destroySwapchainKHR(swapchain, nullptr);
 
@@ -889,6 +1090,7 @@ void MainEngine::cleanup() {
 
     core->gpudevice.destroyDescriptorPool(descriptorPool, nullptr);
 	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout, nullptr);
+	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout_texture, nullptr);
 	
     core->gpudevice.destroyPipelineLayout(defaultPipelineLayout, nullptr);
     core->gpudevice.destroyPipeline(graphicsPipeline, nullptr);

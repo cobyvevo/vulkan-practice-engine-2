@@ -30,6 +30,9 @@ namespace MeshTools {
 			std::string line;
 
 			std::vector<std::array<float,2>> UV_storage;
+			std::vector<std::array<float,3>> vertices_storage;
+
+			int index_count = 0;
 
 			while (!meshfile.eof()) {
 				meshfile >> line; 
@@ -39,18 +42,16 @@ namespace MeshTools {
 					
 					std::cout << "new vertex" << std::endl;
 
-					MeshVertex vert;
+					std::array<float,3>  vert;
 					for (int i = 0; i < 3; i++){
 						meshfile >> line; 
 						std::cout << "float:" << line << std::endl;
-						vert.pos[i] = std::stof(line);
+						vert[i] = std::stof(line);
 					}
-					vertices.push_back(vert);
+					vertices_storage.push_back(vert);
 
 				} else if (line == "vt") {
 					std::cout << "new UV" << std::endl;
-
-					//MeshVertex* vert = &vertices[UV_index];
 					std::array<float,2> uv;
 
 					for (int i = 0; i < 2; i++){
@@ -60,8 +61,6 @@ namespace MeshTools {
 					}
 
 					UV_storage.push_back(uv);
-					//UV_index++;
-
 				} else if (line == "f") {
 					std::cout << "face index" << std::endl;
 
@@ -79,10 +78,18 @@ namespace MeshTools {
 						int vertexindex = std::stoi(vertexindex_str)-1;
 						int uvindex = std::stoi(uvindex_str)-1;
 
-						vertices[vertexindex].uv[0] = UV_storage[uvindex][0];
-						vertices[vertexindex].uv[1] = UV_storage[uvindex][1];
+						MeshVertex newvert;
 
-						indices.push_back(vertexindex);					
+						newvert.uv[0] = UV_storage[uvindex][0];
+						newvert.uv[1] = UV_storage[uvindex][1];
+
+						newvert.pos[0] = vertices_storage[vertexindex][0];
+						newvert.pos[1] = vertices_storage[vertexindex][1];
+						newvert.pos[2] = vertices_storage[vertexindex][2];
+
+						vertices.push_back(newvert);
+						indices.push_back(index_count);
+						index_count++;					
 					}
 
 				}
