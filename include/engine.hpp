@@ -90,15 +90,36 @@ struct FrameInfo {
 struct Material {
 	Texture tex;
 	vk::Pipeline* gpupipeline;
+
+	void Setup(const char* texture_path);
 };
 
 struct Object {
-	Mesh mesh;
-	Material mat;
+	Mesh* mesh;
+	Material* material;
+
 	glm::mat4 transform;
 
-	void Setup(const char* mesh_path, const char* texture_path);
+	void Setup(const char* mesh_path);
 };
+
+struct Scene {
+
+	std::unordered_map<std::string,Material> materials;
+	std::unordered_map<std::string,Object> objects;
+	std::unordered_map<std::string,Mesh> meshes;
+
+	void New_Material(const char* texturepath, std::string name);
+	Object New_Object(const char* meshpath, std::string name, std::string material_name);
+
+};
+
+//create object
+//create material
+//add different object types (object, camera, etc)
+//add scene + scene rendering
+//scene storing / loading
+
 
 class MainEngine {
 private:	
@@ -151,6 +172,7 @@ private:
 	Mesh* testmesh;
 	AllocatedImage testimage;
 	Texture testtexture;
+	Scene testscene;
 
 	std::vector<FrameInfo> frames;
 
@@ -185,6 +207,8 @@ public:
 	AllocatedImage load_texture_file(const char* file);
 
 	Texture create_texture_from_allimage(AllocatedImage* target);
+	void create_texture(Texture* tex);
+	
 	void destroy_texture(Texture* target);
 
 	bool upload_mesh(Mesh* target);

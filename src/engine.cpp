@@ -79,9 +79,77 @@ bool Mesh::Load(const char* path) {
 	return true;
 }
 
-void Object::Setup(const char* mesh_path, const char* texture_path) {
-	
+void Material::Setup(const char* texture_path) {
+	//tex.image = load_texture_file(texture_path);
+	//tex = create_texture(&tex);
+	//gpupipeline = &graphicsPipeline;
 }
+
+void Object::Setup(const char* mesh_path) {
+	//mesh loading*******
+	//mesh.Load(mesh_path);
+	//upload_mesh(mesh);
+}
+
+//SCENE CONTROLS
+
+void Scene::New_Material(const char* texturepath, std::string name) {
+	//mat
+	auto find_mat = materials.find(name);
+	if (find_mat == materials.end()) {
+		Material newmaterial;	
+		//newmaterial.Setup(texturepath); NEEDS MAIN ENGINE
+
+		materials[name] = newmaterial;
+	} else {
+		//newobject.material = &(*find_mat).second;
+	}
+
+}
+
+Object Scene::New_Object(const char* meshpath, std::string name, std::string material_name) {
+	Object newobject;
+	//mesh
+	auto find_mesh = meshes.find(name);
+
+	if (find_mesh == meshes.end()) {
+		//couldnt be found, make new mesh
+		Mesh newmesh;
+		newmesh.Load(meshpath);
+		//upload_mesh(newmesh); NEEDS MAIN ENGINE CONNECTION
+
+		meshes[name] = newmesh;
+		newobject.mesh = &meshes[name];
+
+	} else {
+		//set mesh to already existing
+		newobject.mesh = &(*find_mesh).second;
+	}
+
+	//mat
+	auto find_mat = materials.find(material_name);
+	if (find_mat == materials.end()) {
+		//could not be found
+		std::cout << "could not find material for object" << std::endl;
+	} else {
+		newobject.material = &(*find_mat).second;
+	}
+
+	return newobject;
+}
+
+//
+
+
+//mesh = new Mesh();
+//testmesh->Load("assets/testasset.obj");
+//testimage = load_texture_file("assets/tex.png");
+//testtexture = create_texture_from_allimage(&testimage);
+
+//testmesh->vertices.resize(3);
+//testmesh->vertices[0].pos = {0.0f, 0.0f, 0.0f};
+//testmesh->vertices[1].pos = {0.0f, 0.5f, 0.0f};
+//testmesh->vertices[2].pos = {0.5f, 0.0f, 0.0f};
 
 void VertInputStateDesc::GetDefaultState() {
 	vk::VertexInputBindingDescription mainBinding{};
@@ -332,6 +400,37 @@ Texture MainEngine::create_texture_from_allimage(AllocatedImage* target) {
 	core->gpudevice.updateDescriptorSets(1,&write,0,nullptr);
 
 	return tex;
+}
+
+void MainEngine::create_texture(Texture* tex) {
+	vk::DescriptorSetAllocateInfo allocinfo{};
+	allocinfo.descriptorPool = descriptorPool;
+	allocinfo.descriptorSetCount = 1;
+	allocinfo.pSetLayouts = &descriptorSetLayout_texture; //image sampler layout
+	tex->descriptor = core->gpudevice.allocateDescriptorSets(allocinfo).front();
+
+	vk::SamplerCreateInfo sampler{};
+	sampler.magFilter = vk::Filter::eNearest;
+	sampler.minFilter = vk::Filter::eNearest;
+	//sampler.addressModeU = vk::SamplerAddressMode::eRepeat;
+	//sampler.addressModeV = vk::SamplerAddressMode::eRepeat;	
+	//sampler.addressModeW = vk::SamplerAddressMode::eRepeat;
+
+	tex->sampler = core->gpudevice.createSampler(sampler);
+
+	vk::DescriptorImageInfo imageInfo{};
+	imageInfo.sampler = tex->sampler;
+	imageInfo.imageView = tex->image.imageview;
+	imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+	vk::WriteDescriptorSet write{};
+	write.dstBinding = 0;
+	write.descriptorCount = 1;
+	write.dstSet = tex->descriptor;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.pImageInfo = &imageInfo;
+
+	core->gpudevice.updateDescriptorSets(1,&write,0,nullptr);
 }
 
 void MainEngine::destroy_texture(Texture* target) {
@@ -869,10 +968,15 @@ void MainEngine::CreateGraphicsPipeline() {
 }
 
 void MainEngine::initial() {
+	//testscene.New_Material("assets/tex.png", "SmileTexture");
+	//testscene.New_Object("assets/cube.obj", "Cube", "SmileTexture");
+
 	testmesh = new Mesh();
 	testmesh->Load("assets/testasset.obj");
+
 	testimage = load_texture_file("assets/tex.png");
 	testtexture = create_texture_from_allimage(&testimage);
+
 	//testmesh->vertices.resize(3);
 	//testmesh->vertices[0].pos = {0.0f, 0.0f, 0.0f};
 	//testmesh->vertices[1].pos = {0.0f, 0.5f, 0.0f};
@@ -1146,6 +1250,7 @@ void MainEngine::cleanup() {
 		core->gpudevice.destroySemaphore(rendersubmit_semaphores[i], nullptr);
 		core->gpudevice.destroyFence(render_fences[i], nullptr);
 		destroy_allocated_buffer(&frames[i].cameraBuffer);	
+		destroy_allocated_buffer(&frames[i].objectdataBuffer);	
     }
 
     core->gpudevice.destroyFence(uploadFence, nullptr);
