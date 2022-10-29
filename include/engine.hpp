@@ -89,15 +89,17 @@ struct FrameInfo {
 
 struct Material {
 	Texture tex;
-	vk::Pipeline* gpupipeline;
+	vk::Pipeline gpupipeline;
 
 	void Setup(const char* texture_path);
 };
 
 struct Object {
+	std::string name;
+
 	Mesh* mesh;
 	Material* material;
-
+	
 	glm::mat4 transform;
 
 	void Setup(const char* mesh_path);
@@ -106,8 +108,11 @@ struct Object {
 struct Scene {
 
 	std::unordered_map<std::string,Material> materials;
-	std::unordered_map<std::string,Object> objects;
+	//std::unordered_map<std::string,Object> objects;
 	std::unordered_map<std::string,Mesh> meshes;
+
+	//int obj_count = 0;
+	std::vector<Object*> objects;
 
 	void New_Material(const char* texturepath, std::string name);
 	Object New_Object(const char* meshpath, std::string name, std::string material_name);
@@ -119,7 +124,6 @@ struct Scene {
 //add different object types (object, camera, etc)
 //add scene + scene rendering
 //scene storing / loading
-
 
 class MainEngine {
 private:	
@@ -170,6 +174,8 @@ private:
 
 	//MISC
 	Mesh* testmesh;
+	Object* testobject;
+	Object* testobject2;
 	AllocatedImage testimage;
 	Texture testtexture;
 	Scene testscene;
@@ -181,6 +187,8 @@ public:
 	uint32_t frameFlightNum = 3;
 	uint32_t currentFlight = 0;
 	float tick = 0;
+
+	const int MAX_OBJECTS = 1000;
 
 	MainEngine(uint32_t WIDTH, uint32_t HEIGHT);
 
@@ -205,16 +213,20 @@ public:
 	void run_gpu_instruction(std::function<void(vk::CommandBuffer cmd)>&& function);
 
 	AllocatedImage load_texture_file(const char* file);
-
 	Texture create_texture_from_allimage(AllocatedImage* target);
 	void create_texture(Texture* tex);
-	
 	void destroy_texture(Texture* target);
+
+	void SCENE_new_material(Scene* sc,const char* texture_path, std::string name);
+	Object* SCENE_new_object(Scene* sc,const char* meshpath, std::string name, std::string material_name);
+	void SCENE_cleanup(Scene* sc);
 
 	bool upload_mesh(Mesh* target);
 
 	void initial();
 
+	void step();
 	void draw();
+
 	void cleanup();
 };

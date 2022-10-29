@@ -94,30 +94,95 @@ void Object::Setup(const char* mesh_path) {
 }
 
 //SCENE CONTROLS
-
+/*
 void Scene::New_Material(const char* texturepath, std::string name) {
 	//mat
 	auto find_mat = materials.find(name);
 	if (find_mat == materials.end()) {
 		Material newmaterial;	
-		//newmaterial.Setup(texturepath); NEEDS MAIN ENGINE
+		newmaterial.Setup(texturepath);
 
 		materials[name] = newmaterial;
 	} else {
 		//newobject.material = &(*find_mat).second;
 	}
 
+}*/
+
+void MainEngine::SCENE_new_material(Scene* sc,const char* texture_path, std::string name) { //well, this sucks
+
+	auto find_mat = sc->materials.find(name);
+	if (find_mat == sc->materials.end()) {
+		Material newmaterial;	
+
+		newmaterial.tex.image = load_texture_file(texture_path);
+		create_texture(&newmaterial.tex);
+		newmaterial.gpupipeline = graphicsPipeline;
+
+		sc->materials[name] = newmaterial;
+	} else {
+		//newobject.material = &(*find_mat).second;
+	}
+
 }
 
-Object Scene::New_Object(const char* meshpath, std::string name, std::string material_name) {
+Object* MainEngine::SCENE_new_object(Scene* sc,const char* meshpath, std::string name, std::string material_name) {
+	//Object obj = sc->New_Object(meshpath.name,material_name);
+	Object* newobject = new Object;
+	newobject->name = name;
+	newobject->transform = glm::translate(glm::mat4(1.f), glm::vec3(0.0f,0.0f,0.0f));
+
+	//mesh
+	auto find_mesh = sc->meshes.find(name);
+
+	if (find_mesh == sc->meshes.end()) {
+		//couldnt be found, make new mesh
+	
+		Mesh newmesh;
+		newmesh.Load(meshpath);
+		upload_mesh(&newmesh);
+
+		sc->meshes[name] = newmesh;
+		newobject->mesh = &sc->meshes[name];
+
+	} else {
+		//set mesh to already existing
+		newobject->mesh = &(*find_mesh).second;
+	}
+
+	//mat
+	auto find_mat = sc->materials.find(material_name);
+	if (find_mat == sc->materials.end()) {
+		//could not be found
+		std::cout << "could not find material for object" << std::endl;
+	} else {
+		newobject->material = &(*find_mat).second;
+	}
+	sc->objects.push_back(newobject);
+
+	/*
+	you have NO FUCKING IDEA the hours of pain i just went though. turns out, a pointer to an object within
+	a vector is prone to completely crashing your program at random times, and ive spend about 4 hours 
+	trying to figure this out. the worst part is that i saw quite a few people recommend doing this, so i didnt
+	even think that this wouldve been a problem.
+	you live you learn, i guess. jesus fucking christ
+	*/
+
+	return newobject;
+}
+
+Object Scene::New_Object(const char* meshpath, std::string name, std::string material_name) { //UNUSED
 	Object newobject;
 	//mesh
 	auto find_mesh = meshes.find(name);
 
 	if (find_mesh == meshes.end()) {
 		//couldnt be found, make new mesh
+	
 		Mesh newmesh;
 		newmesh.Load(meshpath);
+		//engine_target->upload_mesh(newmesh);
+
 		//upload_mesh(newmesh); NEEDS MAIN ENGINE CONNECTION
 
 		meshes[name] = newmesh;
@@ -534,7 +599,7 @@ void MainEngine::CreateSwapchain() {
 		imgview.subresourceRange.layerCount = 1;
 
 		swapchainImageViews[i] = core->gpudevice.createImageView(imgview);
-		//std::cout << "imgview" << i << std::endl;
+		std::cout << "imgview" << i << std::endl;
 
 	}
 
@@ -753,7 +818,7 @@ void MainEngine::CreateDescriptorSets() {
 		);
 
 		frames[i].objectdataBuffer = create_allocated_buffer(
-			sizeof(GPUObjectData),
+			sizeof(GPUObjectData) * MAX_OBJECTS,
 			vk::BufferUsageFlagBits::eStorageBuffer,
 			VMA_MEMORY_USAGE_CPU_TO_GPU //also this
 		);
@@ -795,7 +860,7 @@ void MainEngine::CreateDescriptorSets() {
 		vk::DescriptorBufferInfo objectbufferinfo{};
 		objectbufferinfo.buffer = frames[i].objectdataBuffer.buffer;
 		objectbufferinfo.offset = 0;
-		objectbufferinfo.range = sizeof(GPUObjectData);
+		objectbufferinfo.range = sizeof(GPUObjectData) * MAX_OBJECTS;
 
 		vk::WriteDescriptorSet objectbufferwrite{};
 		objectbufferwrite.dstSet = frames[i].objectdescriptor;
@@ -970,21 +1035,36 @@ void MainEngine::CreateGraphicsPipeline() {
 }
 
 void MainEngine::initial() {
+	//testscene.engine_target = &this;
 	//testscene.New_Material("assets/tex.png", "SmileTexture");
-	//testscene.New_Object("assets/cube.obj", "Cube", "SmileTexture");
 
-	testmesh = new Mesh();
-	testmesh->Load("assets/testasset.obj");
+	SCENE_new_material(&testscene,"assets/tex.png", "SmileTexture");
+	SCENE_new_material(&testscene,"assets/tex2.png", "SmileTexture2");
 
-	testimage = load_texture_file("assets/tex.png");
-	testtexture = create_texture_from_allimage(&testimage);
+	testobject = SCENE_new_object(&testscene,"assets/cube.obj", "Cube", "SmileTexture");
+    SCENE_new_object(&testscene,"assets/testasset.obj", "TestAsset", "SmileTexture2");
+
+
+
+//	testmesh = new Mesh();
+	//testmesh->Load("assets/testasset.obj");
+
+	//testimage = load_texture_file("assets/tex.png");
+	//testtexture = create_texture_from_allimage(&testimage);
 
 	//testmesh->vertices.resize(3);
 	//testmesh->vertices[0].pos = {0.0f, 0.0f, 0.0f};
 	//testmesh->vertices[1].pos = {0.0f, 0.5f, 0.0f};
 	//testmesh->vertices[2].pos = {0.5f, 0.0f, 0.0f};
 
-	upload_mesh(testmesh);
+	//upload_mesh(testmesh);
+}
+
+void MainEngine::step() {
+
+	glm::vec3 objcenter = {sin(tick*4) * 10.0f,0.0f,0.0f};
+	testobject->transform = glm::translate(glm::mat4(1.f), objcenter);
+	
 }
 
 void MainEngine::run_gpu_instruction(std::function<void(vk::CommandBuffer cmd)>&& function) {
@@ -1073,6 +1153,7 @@ void MainEngine::ReCreateSwapchain() {
 }
 
 void MainEngine::draw() {
+	std::cout << "draw starting" << std::endl; 
 
 	vk::Semaphore& swapchainavailable_S = swapimageavailable_semaphores[currentFlight];
 	vk::Semaphore& rendersubmit_S = rendersubmit_semaphores[currentFlight];
@@ -1123,25 +1204,24 @@ void MainEngine::draw() {
 	vmaMapMemory(vallocator, currentframe.cameraBuffer.allocation, &data);
 	memcpy(data, &newworlddata, sizeof(WorldData));
 	vmaUnmapMemory(vallocator, currentframe.cameraBuffer.allocation);
-
-
-	GPUObjectData newobjectdata;
-	glm::vec3 objcenter = {sin(tick*4) * 10.0f,0.0f,0.0f};
-	newobjectdata.transform = glm::translate(glm::mat4(1.f), objcenter);
-
 	void* objectdata;
 	vmaMapMemory(vallocator, currentframe.objectdataBuffer.allocation, &objectdata);
-	memcpy(objectdata, &newobjectdata, sizeof(GPUObjectData));
-	vmaUnmapMemory(vallocator, currentframe.objectdataBuffer.allocation);
 
-	//float sine = sin(tick);
+	//ADD TRANSFORMS INTO BUFFER
+	
+	GPUObjectData* objdata_mapped = (GPUObjectData*)objectdata;
+	
+	for (size_t i = 0; i < testscene.objects.size(); i++) {
+		objdata_mapped[i].transform = testscene.objects[i]->transform;
+	}
+
+	vmaUnmapMemory(vallocator, currentframe.objectdataBuffer.allocation);
 
 	vk::ClearValue clearcol{};
 	clearcol.color = vk::ClearColorValue(std::array<float, 4>({{0.1f, 0.1f, 0.1f, 1.0f}}));
 
 	vk::ClearValue depthclearcol{};
 	depthclearcol.depthStencil.depth = 1.0f;
-
 	vk::ClearValue clearvalues[2] = {clearcol,depthclearcol};
 
 	vk::Rect2D renderrect;
@@ -1164,40 +1244,62 @@ void MainEngine::draw() {
 	vp.maxDepth = 1.0f;
 	commandbuffer_current->setViewport(0, 1, &vp);
 	commandbuffer_current->setScissor(0, 1, &renderrect);
-	//vk::Rect2D scissorrect = renderrect;
-	commandbuffer_current->bindPipeline(vk::PipelineBindPoint::eGraphics,graphicsPipeline);
-
-	//vk::DescriptorSet dsets[] = {testtexture.descriptor};
-	commandbuffer_current->bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics,
-		defaultPipelineLayout,
-		0,1,
-		&currentframe.descriptor,
-		0,
-		nullptr
-	);
 	
-	commandbuffer_current->bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics,
-		defaultPipelineLayout,
-		2,1,
-		&currentframe.objectdescriptor,
-		0,
-		nullptr
-	);
+	Material* oldmaterial = nullptr;
+	Mesh* oldmesh = nullptr;
 
-	commandbuffer_current->bindDescriptorSets(
-		vk::PipelineBindPoint::eGraphics,
-		defaultPipelineLayout,
-		1,1,
-		&testtexture.descriptor,
-		0,
-		nullptr
-	);
+	//std::cout << "beginning render" << std::endl;
 
-	vk::DeviceSize offset = 0;
-	commandbuffer_current->bindVertexBuffers(0,1,&testmesh->vertexBuffer.buffer,&offset);
-	commandbuffer_current->draw(testmesh->vertices.size(),1,0,0);
+	for (size_t i = 0; i < testscene.objects.size(); i++) {
+		Object* obj = testscene.objects[i];
+		//std::cout << "mat bind" << std::endl;
+		if (oldmaterial != obj->material) {
+			//bind new material
+			commandbuffer_current->bindPipeline(vk::PipelineBindPoint::eGraphics,obj->material->gpupipeline);
+			
+			commandbuffer_current->bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
+				defaultPipelineLayout,
+				1,1,
+				&obj->material->tex.descriptor,
+				0,
+				nullptr
+			);
+
+			commandbuffer_current->bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
+				defaultPipelineLayout,
+				0,1,
+				&currentframe.descriptor,
+				0,
+				nullptr
+			);
+			
+			commandbuffer_current->bindDescriptorSets(
+				vk::PipelineBindPoint::eGraphics,
+				defaultPipelineLayout,
+				2,1,
+				&currentframe.objectdescriptor,
+				0,
+				nullptr
+			);
+
+			oldmaterial = obj->material;
+
+		} else {
+			//std::cout << "same material" << std::endl;
+		}
+		if (oldmesh != obj->mesh) {
+			vk::DeviceSize offset = 0;
+			commandbuffer_current->bindVertexBuffers(0,1,&obj->mesh->vertexBuffer.buffer,&offset);
+			oldmesh = obj->mesh;
+		}else {
+			//std::cout << "same mesh" << std::endl;
+		}
+		//std::cout << "draw" << std::endl;
+		commandbuffer_current->draw(obj->mesh->vertices.size(),1,0,i);
+			
+	}	
 
 	commandbuffer_current->endRenderPass();
 	commandbuffer_current->end();
@@ -1217,7 +1319,6 @@ void MainEngine::draw() {
 
 	res = core->graphicsQueue.submit(1, &sinfo, fence);
 
-	//
 	vk::PresentInfoKHR presentinfo{};
 	presentinfo.waitSemaphoreCount = 1;
 	presentinfo.pWaitSemaphores = &rendersubmit_S;
@@ -1226,8 +1327,20 @@ void MainEngine::draw() {
 	presentinfo.pImageIndices = &next_swap_image;
 
 	res = core->presentQueue.presentKHR(presentinfo);
-
+	
 	currentFlight = (currentFlight+1)%frameFlightNum;
+}
+
+void MainEngine::SCENE_cleanup(Scene* sc) {
+
+	for (std::pair<std::string,Material> material : sc->materials) {
+		destroy_allocated_image(&material.second.tex.image);
+		destroy_texture(&material.second.tex);
+	}
+
+	for (std::pair<std::string,Mesh> mesh : sc->meshes) {
+		destroy_allocated_buffer(&mesh.second.vertexBuffer);
+	}
 
 }
 
@@ -1235,8 +1348,12 @@ void MainEngine::cleanup() {
 	core->gpudevice.waitIdle();
 
 	destroy_allocated_image(&depthImage);
-	destroy_allocated_image(&testimage);
-	destroy_texture(&testtexture);
+
+	SCENE_cleanup(&testscene);
+
+	//destroy_allocated_image(&testimage);
+	//destroy_allocated_buffer(&testmesh->vertexBuffer);
+	//destroy_texture(&testtexture);
 
     core->gpudevice.destroySwapchainKHR(swapchain, nullptr);
 
@@ -1270,7 +1387,6 @@ void MainEngine::cleanup() {
     core->gpudevice.destroyPipeline(graphicsPipeline, nullptr);
 
 	//vmaDestroyBuffer(vallocator, testmesh->vertexBuffer.buffer, testmesh->vertexBuffer.allocation);
-   	destroy_allocated_buffer(&testmesh->vertexBuffer);
     vmaDestroyAllocator(vallocator);
 
     core->cleanup();
@@ -1298,6 +1414,7 @@ MainEngine::MainEngine(uint32_t WIDTH, uint32_t HEIGHT){
 
 	while (!glfwWindowShouldClose(core->window)) {
         glfwPollEvents();
+        step();
         draw();
     }
 

@@ -1,4 +1,4 @@
-#version 450
+#version 460
 
 layout(location = 0) in vec3 vPos;
 layout(location = 1) in vec2 vUV;
@@ -10,9 +10,13 @@ layout(set = 0, binding = 0) uniform CameraBuffer{
 	mat4 viewproj;
 } Camera;
 
-layout(set = 2, binding = 0) uniform ObjectBuffer{
+struct GPUObjectData {
 	mat4 transform;
-} Object;
+};
+
+layout(std140,set = 2, binding = 0) readonly buffer ObjectBuffer{
+	GPUObjectData data[];
+} ObjectData;
 
 vec2 positions[3] = vec2[](
 	vec2(0,-0.3),
@@ -49,8 +53,8 @@ vec3 cols[24] = vec3[]( //jesus christ
 */
 void main() {
 	//gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-
-	gl_Position = Camera.viewproj * (Object.transform*vec4(vPos,1.0));
+	mat4 transform = ObjectData.data[gl_BaseInstance].transform;
+	gl_Position = Camera.viewproj * (transform*vec4(vPos,1.0));
 
 
 	//gl_Position = Camera.viewproj * (vec4(vPos,1.0));
