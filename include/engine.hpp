@@ -73,6 +73,7 @@ struct Texture {
 
 struct GPUObjectData {
 	glm::mat4 transform;
+	glm::vec4 colour;
 };
 
 struct WorldData {
@@ -85,11 +86,21 @@ struct FrameInfo {
 	vk::DescriptorSet descriptor;
 	vk::DescriptorSet objectdescriptor;
 };
+
+struct MainEnginePipelineInfo {
+
+	std::string VertexShaderPath;
+	std::string FragmentShaderPath;
+
+	bool Textured = true;
+
+};
 //EXTERNAL ABSTRACTIONS
 
 struct Material {
 	Texture tex;
 	vk::Pipeline gpupipeline;
+	vk::PipelineLayout gpupipelinelayout;
 
 	void Setup(const char* texture_path);
 };
@@ -101,6 +112,7 @@ struct Object {
 	Material* material;
 	
 	glm::mat4 transform;
+	glm::vec4 colour;
 
 	void Setup(const char* mesh_path);
 };
@@ -155,8 +167,11 @@ private:
 	std::vector<vk::Fence> render_fences;
 
 	//GPIPELINE
-	vk::Pipeline graphicsPipeline;
-	vk::PipelineLayout defaultPipelineLayout;
+	vk::Pipeline graphicsPipeline_textured;
+	vk::PipelineLayout pipelineLayout_textured;
+
+	vk::Pipeline graphicsPipeline_untextured;
+	vk::PipelineLayout pipelineLayout_untextured;
 
 	//ALLOCATOR
 	VmaAllocator vallocator;
@@ -178,11 +193,12 @@ private:
 	Object* testobject2;
 	AllocatedImage testimage;
 	Texture testtexture;
-	Scene testscene;
-
+	
 	std::vector<FrameInfo> frames;
 
 public:
+	Scene testscene;
+
 	bool windowResized = false;
 	uint32_t frameFlightNum = 3;
 	uint32_t currentFlight = 0;
@@ -200,6 +216,8 @@ public:
 	void CreateCommandpool();
 	void CreateDescriptorSets();
 	void CreateSyncObjects();
+
+	void Create_New_Pipeline(MainEnginePipelineInfo& info, vk::PipelineLayout& target_layout, vk::Pipeline& target_pipeline);
 	void CreateGraphicsPipeline();
 
 	void ReCreateSwapchain();
@@ -227,6 +245,8 @@ public:
 
 	void step();
 	void draw();
+
+	bool StepEngine();
 
 	void cleanup();
 };

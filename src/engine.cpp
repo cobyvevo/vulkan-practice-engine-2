@@ -114,12 +114,12 @@ void MainEngine::SCENE_new_material(Scene* sc,const char* texture_path, std::str
 	auto find_mat = sc->materials.find(name);
 	if (find_mat == sc->materials.end()) {
 		Material newmaterial;	
-
 		newmaterial.tex.image = load_texture_file(texture_path);
 		create_texture(&newmaterial.tex);
-		newmaterial.gpupipeline = graphicsPipeline;
+		newmaterial.gpupipeline = graphicsPipeline_textured;
 
 		sc->materials[name] = newmaterial;
+
 	} else {
 		//newobject.material = &(*find_mat).second;
 	}
@@ -131,7 +131,7 @@ Object* MainEngine::SCENE_new_object(Scene* sc,const char* meshpath, std::string
 	Object* newobject = new Object;
 	newobject->name = name;
 	newobject->transform = glm::translate(glm::mat4(1.f), glm::vec3(0.0f,0.0f,0.0f));
-
+	newobject->colour = glm::vec4(1.0f,0.0f,0.0f,1.0f);
 	//mesh
 	auto find_mesh = sc->meshes.find(name);
 
@@ -155,6 +155,7 @@ Object* MainEngine::SCENE_new_object(Scene* sc,const char* meshpath, std::string
 	if (find_mat == sc->materials.end()) {
 		//could not be found
 		std::cout << "could not find material for object" << std::endl;
+		newobject->material = nullptr;
 	} else {
 		newobject->material = &(*find_mat).second;
 	}
@@ -337,7 +338,7 @@ AllocatedImage MainEngine::load_texture_file(const char* file) {
 	}
 
 	vk::DeviceSize texturesize = texture_width * texture_height * 4;
-	vk::Format textureformat = vk::Format::eB8G8R8A8Srgb;
+	vk::Format textureformat = vk::Format::eR8G8B8A8Srgb;
 
 	AllocatedBuffer stagingbuffer = create_allocated_buffer(
 		texturesize,
@@ -896,21 +897,30 @@ void MainEngine::CreateSyncObjects() {
 
 }
 
-void MainEngine::CreateGraphicsPipeline() {
+void MainEngine::Create_New_Pipeline(MainEnginePipelineInfo& main_pipeline_info, vk::PipelineLayout& target_layout, vk::Pipeline& target_pipeline) {
 
-	vk::DescriptorSetLayout dslayouts[] = {descriptorSetLayout,descriptorSetLayout_texture,descriptorSetLayout_objectdata};
+	//vk::DescriptorSetLayout dslayouts[3];
+	std::vector<vk::DescriptorSetLayout> dslayouts;
+
+	if (main_pipeline_info.Textured == true) {
+		dslayouts.resize(3);
+		dslayouts = {descriptorSetLayout,descriptorSetLayout_texture,descriptorSetLayout_objectdata};
+	} else {
+		dslayouts.resize(2);
+		dslayouts = {descriptorSetLayout,descriptorSetLayout_objectdata};
+	}
 
 	vk::PipelineLayoutCreateInfo defaultinfo{};
 	defaultinfo.pPushConstantRanges = nullptr;
 	defaultinfo.pushConstantRangeCount = 0;
 	defaultinfo.setLayoutCount = 3;
-	defaultinfo.pSetLayouts = dslayouts;
+	defaultinfo.pSetLayouts = dslayouts.data();
 
-	defaultPipelineLayout = core->gpudevice.createPipelineLayout(defaultinfo);
+	target_layout = core->gpudevice.createPipelineLayout(defaultinfo);
 
 	//setup shaders
-	auto vertexFile = readFile("shaders/vert.spv");
-	auto fragFile = readFile("shaders/frag.spv");
+	auto vertexFile = readFile(main_pipeline_info.VertexShaderPath);
+	auto fragFile = readFile(main_pipeline_info.FragmentShaderPath);
 	//vert
 	vk::ShaderModule vertexShader = setupShader(vertexFile,core->gpudevice);
 
@@ -1018,7 +1028,7 @@ void MainEngine::CreateGraphicsPipeline() {
 	graphicsinfo.pDepthStencilState = &depthstencil;
 	graphicsinfo.pColorBlendState = &colorBlendState;
 	graphicsinfo.pDynamicState = &dynamicState;
-	graphicsinfo.layout = defaultPipelineLayout;
+	graphicsinfo.layout = target_layout;
 
 	graphicsinfo.renderPass = renderpass;
 	graphicsinfo.subpass = 0;
@@ -1026,7 +1036,7 @@ void MainEngine::CreateGraphicsPipeline() {
 	graphicsinfo.basePipelineIndex = -1;
 
 	vk::Result res;
-	std::tie(res,graphicsPipeline) = core->gpudevice.createGraphicsPipeline(nullptr,graphicsinfo);
+	std::tie(res,target_pipeline) = core->gpudevice.createGraphicsPipeline(nullptr,graphicsinfo);
 	std::cout << "fin gpipeline" << std::endl;
 
 	core->gpudevice.destroyShaderModule(vertexShader);
@@ -1034,15 +1044,35 @@ void MainEngine::CreateGraphicsPipeline() {
 	
 }
 
-void MainEngine::initial() {
+void MainEngine::CreateGraphicsPipeline() {
+	MainEnginePipelineInfo info;
+	info.VertexShaderPath = "shaders/vert.spv";
+	info.FragmentShaderPath = "shaders/frag.spv";
+	info.Textured = true;
+
+	MainEnginePipelineInfo info2;
+	info2.VertexShaderPath = "shaders/vert.spv";
+	info2.FragmentShaderPath = "shaders/frag_untex.spv";
+	info2.Textured = true;
+
+
+	Create_New_Pipeline(info, pipelineLayout_textured, graphicsPipeline_textured);	
+	Create_New_Pipeline(info2, pipelineLayout_untextured, graphicsPipeline_untextured);	
+}
+
+void MainEngine::initial() // ######## I WILL REMOVE THIS LATER ###############
+
 	//testscene.engine_target = &this;
 	//testscene.New_Material("assets/tex.png", "SmileTexture");
 
-	SCENE_new_material(&testscene,"assets/tex.png", "SmileTexture");
-	SCENE_new_material(&testscene,"assets/tex2.png", "SmileTexture2");
 
-	testobject = SCENE_new_object(&testscene,"assets/cube.obj", "Cube", "SmileTexture");
-    SCENE_new_object(&testscene,"assets/testasset.obj", "TestAsset", "SmileTexture2");
+
+	//SCENE_new_material(&testscene,"assets/tex.png", "SmileTexture");
+	//SCENE_new_material(&testscene,"assets/tabletexture.png", "Table_Texture");
+
+	//testobject = SCENE_new_object(&testscene,"assets/cube.obj", "Cube", "SmileTexture");
+  //  SCENE_new_object(&testscene,"assets/table.obj", "TestAsset", "Table_Texture");
+  //  SCENE_new_object(&testscene,"assets/ball.obj", "TestAsset2", "none");
 
 
 
@@ -1060,11 +1090,14 @@ void MainEngine::initial() {
 	//upload_mesh(testmesh);
 }
 
-void MainEngine::step() {
+void MainEngine::step() { // ######## I WILL REMOVE THIS LATER ###############
 
-	glm::vec3 objcenter = {sin(tick*4) * 10.0f,0.0f,0.0f};
-	testobject->transform = glm::translate(glm::mat4(1.f), objcenter);
-	
+	//glm::vec3 objcenter = {sin(tick*4) * 10.0f,0.0f,0.0f};
+	//glm::vec3 sc = {cos(tick*2) * 5.0f,1.0f,1.0f};
+
+	//testobject->transform = glm::translate(glm::mat4(1.f), objcenter);
+	//testobject->transform = glm::scale(testobject->transform,sc);
+
 }
 
 void MainEngine::run_gpu_instruction(std::function<void(vk::CommandBuffer cmd)>&& function) {
@@ -1153,7 +1186,7 @@ void MainEngine::ReCreateSwapchain() {
 }
 
 void MainEngine::draw() {
-	std::cout << "draw starting" << std::endl; 
+//	std::cout << "draw starting" << std::endl; 
 
 	vk::Semaphore& swapchainavailable_S = swapimageavailable_semaphores[currentFlight];
 	vk::Semaphore& rendersubmit_S = rendersubmit_semaphores[currentFlight];
@@ -1207,12 +1240,13 @@ void MainEngine::draw() {
 	void* objectdata;
 	vmaMapMemory(vallocator, currentframe.objectdataBuffer.allocation, &objectdata);
 
-	//ADD TRANSFORMS INTO BUFFER
+	//ADD OBJECT DATA INTO BUFFER
 	
 	GPUObjectData* objdata_mapped = (GPUObjectData*)objectdata;
 	
 	for (size_t i = 0; i < testscene.objects.size(); i++) {
 		objdata_mapped[i].transform = testscene.objects[i]->transform;
+		objdata_mapped[i].colour = testscene.objects[i]->colour;
 	}
 
 	vmaUnmapMemory(vallocator, currentframe.objectdataBuffer.allocation);
@@ -1252,37 +1286,64 @@ void MainEngine::draw() {
 
 	for (size_t i = 0; i < testscene.objects.size(); i++) {
 		Object* obj = testscene.objects[i];
-		//std::cout << "mat bind" << std::endl;
+		//std::cout << obj->name << std::endl;
 		if (oldmaterial != obj->material) {
 			//bind new material
-			commandbuffer_current->bindPipeline(vk::PipelineBindPoint::eGraphics,obj->material->gpupipeline);
 			
-			commandbuffer_current->bindDescriptorSets(
-				vk::PipelineBindPoint::eGraphics,
-				defaultPipelineLayout,
-				1,1,
-				&obj->material->tex.descriptor,
-				0,
-				nullptr
-			);
+			if (obj->material != nullptr) {
+				//std::cout << "textured" << std::endl;
+				commandbuffer_current->bindPipeline(vk::PipelineBindPoint::eGraphics,obj->material->gpupipeline);
+				
+				commandbuffer_current->bindDescriptorSets(
+					vk::PipelineBindPoint::eGraphics,
+					pipelineLayout_textured,
+					1,1,
+					&obj->material->tex.descriptor,
+					0,
+					nullptr
+				);
 
-			commandbuffer_current->bindDescriptorSets(
-				vk::PipelineBindPoint::eGraphics,
-				defaultPipelineLayout,
-				0,1,
-				&currentframe.descriptor,
-				0,
-				nullptr
-			);
-			
-			commandbuffer_current->bindDescriptorSets(
-				vk::PipelineBindPoint::eGraphics,
-				defaultPipelineLayout,
-				2,1,
-				&currentframe.objectdescriptor,
-				0,
-				nullptr
-			);
+				commandbuffer_current->bindDescriptorSets(
+					vk::PipelineBindPoint::eGraphics,
+					pipelineLayout_textured,
+					0,1,
+					&currentframe.descriptor,
+					0,
+					nullptr
+				);
+				
+				commandbuffer_current->bindDescriptorSets(
+					vk::PipelineBindPoint::eGraphics,
+					pipelineLayout_textured,
+					2,1,
+					&currentframe.objectdescriptor,
+					0,
+					nullptr
+				);
+
+			} else {
+				//std::cout << "untextured" << std::endl;
+				commandbuffer_current->bindPipeline(vk::PipelineBindPoint::eGraphics,graphicsPipeline_untextured);
+				
+				commandbuffer_current->bindDescriptorSets(
+					vk::PipelineBindPoint::eGraphics,
+					pipelineLayout_untextured,
+					0,1,
+					&currentframe.descriptor,
+					0,
+					nullptr
+				);
+				
+				commandbuffer_current->bindDescriptorSets(
+					vk::PipelineBindPoint::eGraphics,
+					pipelineLayout_untextured,
+					2,1,
+					&currentframe.objectdescriptor,
+					0,
+					nullptr
+				);
+
+			}
 
 			oldmaterial = obj->material;
 
@@ -1350,11 +1411,7 @@ void MainEngine::cleanup() {
 	destroy_allocated_image(&depthImage);
 
 	SCENE_cleanup(&testscene);
-
-	//destroy_allocated_image(&testimage);
-	//destroy_allocated_buffer(&testmesh->vertexBuffer);
-	//destroy_texture(&testtexture);
-
+	
     core->gpudevice.destroySwapchainKHR(swapchain, nullptr);
 
     for (auto thing : swapchainImageViews) { //lol
@@ -1383,13 +1440,28 @@ void MainEngine::cleanup() {
 	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout_objectdata, nullptr);
 	core->gpudevice.destroyDescriptorSetLayout(descriptorSetLayout_texture, nullptr);
 	
-    core->gpudevice.destroyPipelineLayout(defaultPipelineLayout, nullptr);
-    core->gpudevice.destroyPipeline(graphicsPipeline, nullptr);
+    core->gpudevice.destroyPipelineLayout(pipelineLayout_textured, nullptr);
+    core->gpudevice.destroyPipeline(graphicsPipeline_textured, nullptr);
+
+    core->gpudevice.destroyPipelineLayout(pipelineLayout_untextured, nullptr);
+    core->gpudevice.destroyPipeline(graphicsPipeline_untextured, nullptr);
 
 	//vmaDestroyBuffer(vallocator, testmesh->vertexBuffer.buffer, testmesh->vertexBuffer.allocation);
     vmaDestroyAllocator(vallocator);
 
     core->cleanup();
+    delete core;
+}
+
+bool MainEngine::StepEngine() {
+	if (glfwWindowShouldClose(core->window)) {
+		return false;
+	} else {
+		glfwPollEvents();
+        step();
+        draw();
+		return true;
+	}
 }
 
 MainEngine::MainEngine(uint32_t WIDTH, uint32_t HEIGHT){
@@ -1412,12 +1484,4 @@ MainEngine::MainEngine(uint32_t WIDTH, uint32_t HEIGHT){
 
 	initial();
 
-	while (!glfwWindowShouldClose(core->window)) {
-        glfwPollEvents();
-        step();
-        draw();
-    }
-
-    cleanup();
-    delete core;
 }

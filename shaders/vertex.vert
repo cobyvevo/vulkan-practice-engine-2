@@ -12,6 +12,7 @@ layout(set = 0, binding = 0) uniform CameraBuffer{
 
 struct GPUObjectData {
 	mat4 transform;
+	vec4 colour;
 };
 
 layout(std140,set = 2, binding = 0) readonly buffer ObjectBuffer{
@@ -53,12 +54,12 @@ vec3 cols[24] = vec3[]( //jesus christ
 */
 void main() {
 	//gl_Position = vec4(positions[gl_VertexIndex], 0.0, 1.0);
-	mat4 transform = ObjectData.data[gl_BaseInstance].transform;
-	gl_Position = Camera.viewproj * (transform*vec4(vPos,1.0));
+	GPUObjectData objectdata = ObjectData.data[gl_BaseInstance];
+	gl_Position = Camera.viewproj * (objectdata.transform*vec4(vPos,1.0));
 
 
 	//gl_Position = Camera.viewproj * (vec4(vPos,1.0));
 
-	fragColor = vec3(0.5,0.5,0.5);//cols[gl_VertexIndex];
+	fragColor = objectdata.colour.xyz; //vec3(1.0,1.0,1.0);//cols[gl_VertexIndex];
 	uvCoord = vUV;
 }

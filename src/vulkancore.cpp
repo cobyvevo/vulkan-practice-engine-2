@@ -115,16 +115,34 @@ QueueFamilyInfo getQueueFamsFromDevice(vk::PhysicalDevice* device, vk::UniqueSur
 	return indices;
 }
 //vulkan
+void error_callback(int code, const char* description)
+{
+	std::cout << description << std::endl;
+}
+
+
 VulkanCore::VulkanCore(uint32_t WIDTH, uint32_t HEIGHT) {
 
 	std::cout << "creating boilerplate" << std::endl;
 	//window stuff
-	glfwInit();
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	window = glfwCreateWindow(WIDTH,HEIGHT, "epic gaming", nullptr, nullptr);
+	glfwInit();	
 
-	windowWidth = WIDTH;
-	windowHeight = HEIGHT;
+	glfwSetErrorCallback(error_callback);
+
+	GLFWmonitor* primary = glfwGetPrimaryMonitor();
+	const GLFWvidmode* mode = glfwGetVideoMode(primary);
+
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	uint32_t real_w = std::min(WIDTH,(uint32_t) mode->width);
+	uint32_t real_h = std::min(HEIGHT,(uint32_t) mode->height);
+	
+
+	window = glfwCreateWindow(real_w,real_h, "epic gaming", nullptr, nullptr);
+
+
+
+	windowWidth = real_w;
+	windowHeight = real_h;
 	//
 
 	bool validationLayersEnabled = true;

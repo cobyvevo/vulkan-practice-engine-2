@@ -8,6 +8,7 @@ VulkanTest: ./src/*.cpp
 
 test: VulkanTest
 	glslc ./shaders/frag.frag -o ./shaders/frag.spv
+	glslc ./shaders/frag_untex.frag -o ./shaders/frag_untex.spv
 	glslc ./shaders/vertex.vert -o ./shaders/vert.spv
 	konsole -e ./VulkanTest
 	#xterm ./VulkanTest
