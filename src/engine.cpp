@@ -683,6 +683,10 @@ void MainEngine::CreateRenderpass() {
 	vk::AttachmentReference depthRef{};
 	depthRef.attachment = 1;
 	depthRef.layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
+
+	vk::AttachmentReference depthRef_Single{};
+	depthRef_Single.attachment = 0;
+	depthRef_Single.layout = vk::ImageLayout::eDepthStencilAttachmentOptimal;
 	//
 
 	//subpass
@@ -691,6 +695,11 @@ void MainEngine::CreateRenderpass() {
 	mainsubpass.colorAttachmentCount = 1;
 	mainsubpass.pColorAttachments = &colorRef;
 	mainsubpass.pDepthStencilAttachment = &depthRef;
+
+	vk::SubpassDescription shadowsubpass{};
+	shadowsubpass.pipelineBindPoint = vk::PipelineBindPoint::eGraphics;
+	shadowsubpass.colorAttachmentCount = 0;
+	shadowsubpass.pDepthStencilAttachment = &depthRef_Single;
 
 	vk::SubpassDependency mainsubpassDependency{};
 	mainsubpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL; //everything before the render pass
@@ -722,7 +731,21 @@ void MainEngine::CreateRenderpass() {
 	renderpassInfo.pDependencies = &passDependencies[0];
 
 	renderpass = core->gpudevice.createRenderPass(renderpassInfo);
-	std::cout << "rendeprass" << std::endl;
+
+	vk::AttachmentDescription shadowAttachments[1] = {depthAttachment};
+	vk::SubpassDependency shadowDependencies[1] = {depthsubpassDependency};
+
+	vk::RenderPassCreateInfo renderpassInfo_shadow{};
+	renderpassInfo_shadow.flags = {};
+	renderpassInfo_shadow.attachmentCount = 1;
+	renderpassInfo_shadow.pAttachments = &shadowAttachments[0];
+	renderpassInfo_shadow.subpassCount = 1;
+	renderpassInfo_shadow.pSubpasses = &shadowsubpass;
+	renderpassInfo_shadow.dependencyCount = 1;
+	renderpassInfo_shadow.pDependencies = &shadowDependencies[0];
+
+	renderpass_shadow = core->gpudevice.createRenderPass(renderpassInfo_shadow);
+
 
 }
 
@@ -743,9 +766,10 @@ void MainEngine::CreateFramebuffer() {
 		fbinfo.layers = 1;
 
 		swapchainFramebuffer[i] = core->gpudevice.createFramebuffer(fbinfo);
-		//std::cout << "made framebuffer" << i << std::endl;
+		std::cout << "made framebuffer" << i << std::endl;
 
 	}
+
 
 }
 
@@ -852,6 +876,7 @@ void MainEngine::CreateDescriptorSets() {
 	descriptorSetLayout_objectdata = core->gpudevice.createDescriptorSetLayout(setinfo_objectdata);
 	descriptorSetLayout_texture = core->gpudevice.createDescriptorSetLayout(setinfo_texture);
 
+
 	frames.resize(frameFlightNum);
 
 	for (uint32_t i = 0; i < frameFlightNum; i++) {
@@ -917,6 +942,12 @@ void MainEngine::CreateDescriptorSets() {
 		//update allocation
 		core->gpudevice.updateDescriptorSets(1,&camerawrite,0,nullptr);	
 		core->gpudevice.updateDescriptorSets(1,&objectbufferwrite,0,nullptr);	
+
+	}
+
+
+	for (uint32_t i = 0; i < frameFlightNum; i++) {
+		InitShadowmap(&frames[i].shadows);
 	}
 
 }
@@ -947,7 +978,7 @@ void MainEngine::Create_New_Pipeline(MainEnginePipelineInfo& main_pipeline_info,
 
 	std::vector<vk::DescriptorSetLayout> dslayouts;
 
-	if (main_pipeline_info.Textured == true && main_pipeline_info.DepthOnly == false) {
+	if (main_pipeline_info.Textured == true) {
 		dslayouts.resize(3);
 		dslayouts = {descriptorSetLayout,descriptorSetLayout_texture,descriptorSetLayout_objectdata};
 	} else {
@@ -992,9 +1023,6 @@ void MainEngine::Create_New_Pipeline(MainEnginePipelineInfo& main_pipeline_info,
 		vk::PipelineViewportStateCreateInfo viewportState{};
 		viewportState.viewportCount = 1;
 		viewportState.scissorCount = 1;
-
-		viewportState.pViewports = &temp_viewport;
-		viewportState.pScissors = &temp_scissor;
 		//
 
 		//depth stencil
@@ -1017,24 +1045,35 @@ void MainEngine::Create_New_Pipeline(MainEnginePipelineInfo& main_pipeline_info,
 		vertexInputStateInfo.pVertexAttributeDescriptions = defaultdesc.attributes.data();
 		//
 
+		//rasterizer
+		vk::PipelineRasterizationStateCreateInfo rasterizer{};
+		rasterizer.depthClampEnable = false;
+		rasterizer.rasterizerDiscardEnable = true;
+		rasterizer.polygonMode = vk::PolygonMode::eFill;
+		rasterizer.cullMode = vk::CullModeFlagBits::eNone;	
+		rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
+		rasterizer.depthBiasEnable = false;
+		rasterizer.lineWidth = 1.0f;
+		//
+
 
 		vk::GraphicsPipelineCreateInfo graphicsinfo{};
 
-		graphicsinfo.stageCount = 2; //how many fragment, vertex, geometry etc
+		graphicsinfo.stageCount = 1;
 		graphicsinfo.pStages = stages;
 
 		graphicsinfo.pVertexInputState = &vertexInputStateInfo;
 		graphicsinfo.pInputAssemblyState = &inputAssembly;
 		graphicsinfo.pTessellationState = nullptr;
 		graphicsinfo.pViewportState = &viewportState;
-		graphicsinfo.pRasterizationState = nullptr;
+		graphicsinfo.pRasterizationState = &rasterizer;
 		graphicsinfo.pMultisampleState = nullptr;
 		graphicsinfo.pDepthStencilState = &depthstencil;
 		graphicsinfo.pColorBlendState = nullptr;
-		graphicsinfo.pDynamicState = &dynamicStates;
+		graphicsinfo.pDynamicState = &dynamicState;
 		graphicsinfo.layout = target_layout;
 
-		graphicsinfo.renderPass = renderpass;
+		graphicsinfo.renderPass = renderpass_shadow; //hardecoded LOL
 		graphicsinfo.subpass = 0;
 		graphicsinfo.basePipelineHandle = nullptr;
 		graphicsinfo.basePipelineIndex = -1;
@@ -1098,8 +1137,8 @@ void MainEngine::Create_New_Pipeline(MainEnginePipelineInfo& main_pipeline_info,
 
 	//rasterizer
 	vk::PipelineRasterizationStateCreateInfo rasterizer{};
-	rasterizer.depthClampEnable = fal;
-	rasterizer.rasterizerDiscardEnable = faselse;
+	rasterizer.depthClampEnable = false;
+	rasterizer.rasterizerDiscardEnable = false;
 	rasterizer.polygonMode = vk::PolygonMode::eFill;
 	rasterizer.cullMode = vk::CullModeFlagBits::eNone;	
 	rasterizer.frontFace = vk::FrontFace::eCounterClockwise;
@@ -1205,33 +1244,36 @@ void MainEngine::CreateShadowmap() {
 	info.DepthOnly = true;
 
 	Create_New_Pipeline(info, shadowmapLayout, shadowmapPipeline);	
-
-	for (uint32_t i = 0; i < frameFlightNum; i++) {
-		frames[i].shadows.extent = {100,100,1};
-	}
 }
 
 void MainEngine::InitShadowmap(ShadowMapper* target) {
+	vk::Extent3D depthImgExtent = {100,100,1};
+	target->extent = depthImgExtent;
+
+	std::cout << "a" << std::endl;
 
 	target->depthImage = create_allocated_image(
 		depthFormat, 
 		vk::ImageUsageFlagBits::eDepthStencilAttachment, 
-		depthImgExtent, 
+		target->extent, 
 		VMA_MEMORY_USAGE_GPU_ONLY, 
 		true, 
 		vk::ImageAspectFlagBits::eDepth
 	);
-
+	std::cout << "b" << std::endl;
+	
 	vk::FramebufferCreateInfo fbinfo{};
-	fbinfo.renderPass = renderpass;
+	fbinfo.renderPass = renderpass_shadow;
 	fbinfo.attachmentCount = 1;
 	fbinfo.pAttachments = &target->depthImage.imageview;
-	fbinfo.width = target->extent.width;
-	fbinfo.height = target->extent.height;
+	fbinfo.width = 100;
+	fbinfo.height = 100;
 	fbinfo.layers = 1;
 
+	std::cout << "c" << std::endl;
+	
 	target->framebuffer = core->gpudevice.createFramebuffer(fbinfo);
-	//std::cout << "made framebuffer" << i << std::endl;
+	std::cout << "made shadow framebuffer" << std::endl;
 }
 
 void MainEngine::initial() {// ######## I WILL REMOVE THIS LATER ###############
@@ -1364,22 +1406,88 @@ void MainEngine::ReCreateSwapchain() {
 void MainEngine::shadowdraw(FrameInfo* current) {
 
 	ShadowMapper* shadowmap = &current->shadows;
+	//std::cout << "a" << std::endl;
 
-	shadowCmdBuffer->reset();
+	shadowCmdBuffer.reset();
+
+	//std::cout << "b" << std::endl;
 
 	vk::ClearValue depthclearcol{};
 	depthclearcol.depthStencil.depth = 1.0f;
+	vk::ClearValue clearvalues[1] = {depthclearcol};
 
 	vk::Rect2D renderrect;
-	renderrect.extent = shadowmap->extent;
+	vk::Extent2D sextent = {shadowmap->extent.width,shadowmap->extent.height};
+	renderrect.extent = sextent;
 
+	//std::cout << "c" << std::endl;
 	vk::CommandBufferBeginInfo commandbegininfo{};
+
+
+
 	vk::RenderPassBeginInfo begininfo{};
-	begininfo.renderPass = renderpass;
+	begininfo.renderPass = renderpass_shadow;
 	begininfo.framebuffer = shadowmap->framebuffer;
 	begininfo.renderArea = renderrect;
-	begininfo.clearValueCount = 2;
-	begininfo.pClearValues = &depthclearcol;
+	begininfo.clearValueCount = 1;
+	begininfo.pClearValues = &clearvalues[0];
+
+	//std::cout << "d" << std::endl;
+	shadowCmdBuffer.begin(commandbegininfo);
+	shadowCmdBuffer.beginRenderPass(begininfo, vk::SubpassContents::eInline);
+	//std::cout << "e" << std::endl;
+	vk::Viewport vp;
+	vp.width = (float) shadowmap->extent.width;
+	vp.height = (float) shadowmap->extent.height;
+	vp.maxDepth = 1.0f;
+	shadowCmdBuffer.setViewport(0, 1, &vp);
+	shadowCmdBuffer.setScissor(0, 1, &renderrect);
+//	std::cout << "f" << std::endl;
+	Material* oldmaterial = nullptr;
+	Mesh* oldmesh = nullptr;
+
+	shadowCmdBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics,shadowmapPipeline);
+//	std::cout << "g" << std::endl;
+	shadowCmdBuffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics,
+		shadowmapLayout,
+		0,1,
+		&current->descriptor,
+		0,
+		nullptr
+	);
+	//std::cout << "h" << std::endl;	
+	shadowCmdBuffer.bindDescriptorSets(
+		vk::PipelineBindPoint::eGraphics,
+		shadowmapLayout,
+		2,1,
+		&current->objectdescriptor,
+		0,
+		nullptr
+	);
+	//std::cout << "i" << std::endl;
+	for (size_t i = 0; i < scene_draw_target->objects.size(); i++) {
+		Object* obj = scene_draw_target->objects[i];
+		//std::cout << obj->name << std::endl;
+		if (obj->mesh != nullptr) {
+
+			if (oldmesh != obj->mesh) {
+				vk::DeviceSize offset = 0;
+				shadowCmdBuffer.bindVertexBuffers(0,1,&obj->mesh->vertexBuffer.buffer,&offset);
+				oldmesh = obj->mesh;
+			}else {
+				//std::cout << "same mesh" << std::endl;
+			}
+			//std::cout << "draw" << std::endl;
+			shadowCmdBuffer.draw(obj->mesh->vertices.size(),1,0,i);
+		}
+	}	
+	//std::cout << "j" << std::endl;
+	shadowCmdBuffer.endRenderPass();
+	shadowCmdBuffer.end();
+
+
+	//std::cout << "k" << std::endl;
 }
 
 void MainEngine::draw() {
@@ -1443,6 +1551,7 @@ void MainEngine::draw() {
 	vmaMapMemory(vallocator, currentframe.cameraBuffer.allocation, &data);
 	memcpy(data, &newworlddata, sizeof(WorldData));
 	vmaUnmapMemory(vallocator, currentframe.cameraBuffer.allocation);
+
 	void* objectdata;
 	vmaMapMemory(vallocator, currentframe.objectdataBuffer.allocation, &objectdata);
 
@@ -1475,6 +1584,8 @@ void MainEngine::draw() {
 	begininfo.clearValueCount = 2;
 	begininfo.pClearValues = &clearvalues[0];
 
+	shadowdraw(&currentframe);
+
 	commandbuffer_current->begin(commandbegininfo);
 	commandbuffer_current->beginRenderPass(begininfo, vk::SubpassContents::eInline);
 
@@ -1489,6 +1600,7 @@ void MainEngine::draw() {
 	Mesh* oldmesh = nullptr;
 
 	//std::cout << "beginning render" << std::endl;
+
 
 	for (size_t i = 0; i < scene_draw_target->objects.size(); i++) {
 		Object* obj = scene_draw_target->objects[i];
@@ -1696,6 +1808,7 @@ MainEngine::MainEngine(uint32_t WIDTH, uint32_t HEIGHT){
 	CreateRenderpass();
 	CreateFramebuffer();
 	CreateCommandpool();
+
 	CreateDescriptorSets();
 	CreateSyncObjects();
 

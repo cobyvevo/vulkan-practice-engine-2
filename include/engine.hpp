@@ -82,11 +82,19 @@ struct WorldData {
 	glm::mat4 viewproj;
 };
 
+struct ShadowMapper {
+	vk::Extent3D extent;
+	AllocatedImage depthImage;
+	vk::Framebuffer framebuffer;
+};
+
 struct FrameInfo {
 	AllocatedBuffer cameraBuffer;
 	AllocatedBuffer objectdataBuffer;
 	vk::DescriptorSet descriptor;
 	vk::DescriptorSet objectdescriptor;
+
+	ShadowMapper shadows;
 };
 
 struct MainEnginePipelineInfo {
@@ -95,8 +103,10 @@ struct MainEnginePipelineInfo {
 	std::string FragmentShaderPath;
 
 	bool Textured = true;
+	bool DepthOnly = false;
 
 };
+
 //EXTERNAL ABSTRACTIONS
 
 struct Material {
@@ -160,6 +170,7 @@ private:
 	std::vector<vk::Framebuffer> swapchainFramebuffer;
 	//RENDERPASS
 	vk::RenderPass renderpass;
+	vk::RenderPass renderpass_shadow;
 
 	//CMDPOOLS
 	vk::CommandPool cmdPool;
@@ -168,6 +179,9 @@ private:
 		vk::Fence uploadFence;
 		vk::CommandPool uploadCmdPool;
 		vk::CommandBuffer uploadCmdBuffer;
+		//SHADOWMAP
+		vk::CommandPool shadowCmdPool;
+		vk::CommandBuffer shadowCmdBuffer;
 
 	//SYNC OBJECTS
 	std::vector<vk::Semaphore> swapimageavailable_semaphores;
@@ -181,6 +195,9 @@ private:
 	vk::Pipeline graphicsPipeline_untextured;
 	vk::PipelineLayout pipelineLayout_untextured;
 
+	vk::Pipeline shadowmapPipeline;
+	vk::PipelineLayout shadowmapLayout;
+
 	//ALLOCATOR
 	VmaAllocator vallocator;
 
@@ -190,7 +207,7 @@ private:
 	vk::DescriptorSetLayout descriptorSetLayout;
 	vk::DescriptorSetLayout descriptorSetLayout_objectdata;
 	vk::DescriptorSetLayout descriptorSetLayout_texture;
-
+	
 	//DEPTH BUFFER
 	vk::Format depthFormat;
 	AllocatedImage depthImage;
@@ -230,6 +247,9 @@ public:
 	void Create_New_Pipeline(MainEnginePipelineInfo& info, vk::PipelineLayout& target_layout, vk::Pipeline& target_pipeline);
 	void CreateGraphicsPipeline();
 
+	void CreateShadowmap();
+	void InitShadowmap(ShadowMapper* target);
+
 	void ReCreateSwapchain();
 
 	AllocatedBuffer create_allocated_buffer(size_t allocSize, vk::Flags<vk::BufferUsageFlagBits> usageBits, VmaMemoryUsage memoryUsageFlag);
@@ -256,6 +276,8 @@ public:
 	void initial();
 
 	void step();
+
+	void shadowdraw(FrameInfo* current);
 	void draw();
 
 	bool StepEngine();
