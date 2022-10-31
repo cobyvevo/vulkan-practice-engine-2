@@ -2,9 +2,11 @@
 
 layout(location = 0) in vec3 vPos;
 layout(location = 1) in vec2 vUV;
+layout(location = 2) in vec3 vNorm;
 
 layout(location = 0) out vec3 fragColor;
 layout(location = 1) out vec2 uvCoord;
+layout(location = 2) out vec3 fragNormal;
 
 layout(set = 0, binding = 0) uniform CameraBuffer{
 	mat4 viewproj;
@@ -61,5 +63,6 @@ void main() {
 	//gl_Position = Camera.viewproj * (vec4(vPos,1.0));
 
 	fragColor = objectdata.colour.xyz; //vec3(1.0,1.0,1.0);//cols[gl_VertexIndex];
+	fragNormal = vNorm;
 	uvCoord = vUV;
 }

@@ -41,6 +41,8 @@ struct VertInputStateDesc {
 struct Vertex {
 	glm::vec3 pos;
 	glm::vec2 uv;
+	glm::vec3 norm;
+
 	bool operator==(const Vertex& other) const {
 		return (other.pos==pos && other.uv==uv);
 	}
@@ -114,6 +116,10 @@ struct Object {
 	glm::mat4 transform;
 	glm::vec4 colour;
 
+	void SetPosition(glm::vec3 pos);
+	void Scale(glm::vec3 scale);
+	void SetRotation(); //not yet
+
 	void Setup(const char* mesh_path);
 };
 
@@ -125,6 +131,8 @@ struct Scene {
 
 	//int obj_count = 0;
 	std::vector<Object*> objects;
+
+	Object* active_viewport = nullptr;
 
 	void New_Material(const char* texturepath, std::string name);
 	Object New_Object(const char* meshpath, std::string name, std::string material_name);
@@ -197,7 +205,9 @@ private:
 	std::vector<FrameInfo> frames;
 
 public:
-	Scene testscene;
+	Scene default_scene;
+
+	Scene* scene_draw_target;
 
 	bool windowResized = false;
 	uint32_t frameFlightNum = 3;
@@ -236,8 +246,10 @@ public:
 	void destroy_texture(Texture* target);
 
 	void SCENE_new_material(Scene* sc,const char* texture_path, std::string name);
-	Object* SCENE_new_object(Scene* sc,const char* meshpath, std::string name, std::string material_name);
+	Object* SCENE_new_object(Scene* sc,std::string meshpath, std::string name, std::string material_name);
 	void SCENE_cleanup(Scene* sc);
+	void SCENE_set_active(Scene* sc);
+	void SCENE_set_viewport(Scene* sc, Object* obj);
 
 	bool upload_mesh(Mesh* target);
 
