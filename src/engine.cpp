@@ -357,6 +357,25 @@ void MainEngine::destroy_allocated_image(AllocatedImage* aimage) {
 	vmaDestroyImage(vallocator, static_cast<VkImage>(aimage->image), aimage->allocation);
 }
 
+//SHADOWMAP TODO
+/*
+
+DescriptoSet bindings point towards buffers/images that are in memory, so
+
+Along with the camera UBO, pass along the shadowmap image sampler on binding 2:
+
+First render the shadowmap
+Next, barrier the shadowmap so that its eShaderReadOnlyOptimal
+It should in theory be readable through the descriptor set
+
+
+
+
+ok update, everything works but the actual image is layout type of undefined, may be a sync issue
+trying to set sync with the subpass dependencies but cant wrap my head around it
+
+*/
+
 AllocatedImage MainEngine::load_texture_file(const char* file) {
 
 	int texture_width, texture_height, texture_channels;
@@ -716,6 +735,27 @@ void MainEngine::CreateRenderpass() {
 	depthsubpassDependency.dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests | vk::PipelineStageFlagBits::eLateFragmentTests; 
 	depthsubpassDependency.srcAccessMask = {};
 	depthsubpassDependency.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite; 
+
+
+
+	vk::SubpassDependency shaderDepthSubpassDependency{};
+	shaderDepthSubpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL; //everything before the render pass
+	shaderDepthSubpassDependency.dstSubpass = 0;
+	shaderDepthSubpassDependency.srcStageMask = vk::PipelineStageFlagBits::eFragmentShader;
+	shaderDepthSubpassDependency.dstStageMask = vk::PipelineStageFlagBits::eEarlyFragmentTests; 
+	shaderDepthSubpassDependency.srcAccessMask = {};
+	shaderDepthSubpassDependency.dstAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite; 
+	shaderDepthSubpassDependency.dependencyFlags = vk::DependencyFlagBits::eByRegion;
+
+	vk::SubpassDependency shaderDepthSubpassConvertDependency{};
+	shaderDepthSubpassConvertDependency.srcSubpass = 0;
+	shaderDepthSubpassConvertDependency.dstSubpass = VK_SUBPASS_EXTERNAL;
+	shaderDepthSubpassConvertDependency.srcStageMask = vk::PipelineStageFlagBits::eLateFragmentTests;
+	shaderDepthSubpassConvertDependency.dstStageMask = vk::PipelineStageFlagBits::eFragmentShader; 
+	shaderDepthSubpassConvertDependency.srcAccessMask = vk::AccessFlagBits::eDepthStencilAttachmentWrite;
+	shaderDepthSubpassConvertDependency.dstAccessMask = vk::AccessFlagBits::eShaderRead; 
+	shaderDepthSubpassConvertDependency.dependencyFlags = vk::DependencyFlagBits::eByRegion;
+
 	//
 
 	vk::AttachmentDescription passAttachments[2] = {colorAttachment,depthAttachment};
@@ -733,7 +773,7 @@ void MainEngine::CreateRenderpass() {
 	renderpass = core->gpudevice.createRenderPass(renderpassInfo);
 
 	vk::AttachmentDescription shadowAttachments[1] = {depthAttachment};
-	vk::SubpassDependency shadowDependencies[1] = {depthsubpassDependency};
+	vk::SubpassDependency shadowDependencies[2] = {shaderDepthSubpassDependency,shaderDepthSubpassConvertDependency};
 
 	vk::RenderPassCreateInfo renderpassInfo_shadow{};
 	renderpassInfo_shadow.flags = {};
@@ -741,7 +781,7 @@ void MainEngine::CreateRenderpass() {
 	renderpassInfo_shadow.pAttachments = &shadowAttachments[0];
 	renderpassInfo_shadow.subpassCount = 1;
 	renderpassInfo_shadow.pSubpasses = &shadowsubpass;
-	renderpassInfo_shadow.dependencyCount = 1;
+	renderpassInfo_shadow.dependencyCount = 2;
 	renderpassInfo_shadow.pDependencies = &shadowDependencies[0];
 
 	renderpass_shadow = core->gpudevice.createRenderPass(renderpassInfo_shadow);
@@ -844,9 +884,17 @@ void MainEngine::CreateDescriptorSets() {
 	cameraBufferBinding.descriptorType = vk::DescriptorType::eUniformBuffer;
 	cameraBufferBinding.stageFlags = vk::ShaderStageFlagBits::eVertex;
 
+	vk::DescriptorSetLayoutBinding shadowmapDepthBinding{};
+	shadowmapDepthBinding.binding = 1;
+	shadowmapDepthBinding.descriptorCount = 1;
+	shadowmapDepthBinding.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	shadowmapDepthBinding.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+	vk::DescriptorSetLayoutBinding bindings[] = {cameraBufferBinding,shadowmapDepthBinding};
+
 	vk::DescriptorSetLayoutCreateInfo setinfo{};
-	setinfo.bindingCount = 1;
-	setinfo.pBindings = &cameraBufferBinding;
+	setinfo.bindingCount = 2;
+	setinfo.pBindings = bindings;
 
 	//object data
 
@@ -880,6 +928,7 @@ void MainEngine::CreateDescriptorSets() {
 	frames.resize(frameFlightNum);
 
 	for (uint32_t i = 0; i < frameFlightNum; i++) {
+		InitShadowmap(&frames[i].shadows);
 
 		frames[i].cameraBuffer = create_allocated_buffer(
 			sizeof(WorldData),
@@ -913,11 +962,49 @@ void MainEngine::CreateDescriptorSets() {
 
 		//write allocation
 
+		/*
+
+	vk::SamplerCreateInfo sampler{};
+	sampler.magFilter = vk::Filter::eNearest;
+	sampler.minFilter = vk::Filter::eNearest;
+	//sampler.addressModeU = vk::SamplerAddressMode::eRepeat;
+	//sampler.addressModeV = vk::SamplerAddressMode::eRepeat;	
+	//sampler.addressModeW = vk::SamplerAddressMode::eRepeat;
+
+	tex->sampler = core->gpudevice.createSampler(sampler);
+
+	vk::DescriptorImageInfo imageInfo{};
+	imageInfo.sampler = tex->sampler;
+	imageInfo.imageView = tex->image.imageview;
+	imageInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+	vk::WriteDescriptorSet write{};
+	write.dstBinding = 0;
+	write.descriptorCount = 1;
+	write.dstSet = tex->descriptor;
+	write.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+	write.pImageInfo = &imageInfo;
+
+		*/
+
 		//cam
 		vk::DescriptorBufferInfo camerabufferinfo{};
 		camerabufferinfo.buffer = frames[i].cameraBuffer.buffer;
 		camerabufferinfo.offset = 0;
 		camerabufferinfo.range = sizeof(WorldData);
+
+		vk::SamplerCreateInfo shadowmapSampler{};
+		shadowmapSampler.magFilter = vk::Filter::eNearest;
+		shadowmapSampler.minFilter = vk::Filter::eNearest;
+
+		frames[i].shadows.sampler = core->gpudevice.createSampler(shadowmapSampler);
+
+		vk::DescriptorImageInfo shadowmapInfo{};
+		shadowmapInfo.sampler = frames[i].shadows.sampler;
+		shadowmapInfo.imageView = frames[i].shadows.depthImage.imageview;
+		shadowmapInfo.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+
 
 		vk::WriteDescriptorSet camerawrite{};
 		camerawrite.dstSet = frames[i].descriptor;
@@ -925,6 +1012,14 @@ void MainEngine::CreateDescriptorSets() {
 		camerawrite.descriptorCount = 1;
 		camerawrite.descriptorType = vk::DescriptorType::eUniformBuffer;
 		camerawrite.pBufferInfo = &camerabufferinfo;
+
+		vk::WriteDescriptorSet shadowmapwrite{};
+		shadowmapwrite.dstSet = frames[i].descriptor;
+		shadowmapwrite.dstBinding = 1;
+		shadowmapwrite.descriptorCount = 1;
+		shadowmapwrite.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+		shadowmapwrite.pImageInfo = &shadowmapInfo;
+
 
 		//obj
 		vk::DescriptorBufferInfo objectbufferinfo{};
@@ -940,15 +1035,13 @@ void MainEngine::CreateDescriptorSets() {
 		objectbufferwrite.pBufferInfo = &objectbufferinfo;
 
 		//update allocation
-		core->gpudevice.updateDescriptorSets(1,&camerawrite,0,nullptr);	
+		vk::WriteDescriptorSet cwrites[] = {camerawrite,shadowmapwrite};
+
+		core->gpudevice.updateDescriptorSets(2,cwrites,0,nullptr);	
 		core->gpudevice.updateDescriptorSets(1,&objectbufferwrite,0,nullptr);	
 
 	}
 
-
-	for (uint32_t i = 0; i < frameFlightNum; i++) {
-		InitShadowmap(&frames[i].shadows);
-	}
 
 }
 
@@ -978,12 +1071,19 @@ void MainEngine::Create_New_Pipeline(MainEnginePipelineInfo& main_pipeline_info,
 
 	std::vector<vk::DescriptorSetLayout> dslayouts;
 
-	if (main_pipeline_info.Textured == true) {
+	if (main_pipeline_info.DepthOnly == true) {
+		dslayouts.resize(3);
+		dslayouts = {descriptorSetLayout,descriptorSetLayout_texture,descriptorSetLayout_objectdata};	
+		std::cout << "depth ds" << std::endl;
+	}
+	else if (main_pipeline_info.Textured == true) {
 		dslayouts.resize(3);
 		dslayouts = {descriptorSetLayout,descriptorSetLayout_texture,descriptorSetLayout_objectdata};
+		std::cout << "textured ds" << std::endl;
 	} else {
 		dslayouts.resize(2);
 		dslayouts = {descriptorSetLayout,descriptorSetLayout_objectdata};
+		std::cout << "untextured ds" << std::endl;
 	}
 
 	if (main_pipeline_info.DepthOnly == true) {
@@ -1234,7 +1334,9 @@ void MainEngine::CreateGraphicsPipeline() {
 	info2.Textured = true;
 
 
+	std::cout << "textured" << std::endl;
 	Create_New_Pipeline(info, pipelineLayout_textured, graphicsPipeline_textured);	
+	std::cout << "textured" << std::endl;
 	Create_New_Pipeline(info2, pipelineLayout_untextured, graphicsPipeline_untextured);	
 }
 
@@ -1254,12 +1356,13 @@ void MainEngine::InitShadowmap(ShadowMapper* target) {
 
 	target->depthImage = create_allocated_image(
 		depthFormat, 
-		vk::ImageUsageFlagBits::eDepthStencilAttachment, 
+		vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eSampled, 
 		target->extent, 
 		VMA_MEMORY_USAGE_GPU_ONLY, 
 		true, 
 		vk::ImageAspectFlagBits::eDepth
 	);
+
 	std::cout << "b" << std::endl;
 	
 	vk::FramebufferCreateInfo fbinfo{};
@@ -1485,8 +1588,6 @@ void MainEngine::shadowdraw(FrameInfo* current) {
 	//std::cout << "j" << std::endl;
 	shadowCmdBuffer.endRenderPass();
 	shadowCmdBuffer.end();
-
-
 	//std::cout << "k" << std::endl;
 }
 
@@ -1758,6 +1859,10 @@ void MainEngine::cleanup() {
 		core->gpudevice.destroyFence(render_fences[i], nullptr);
 		destroy_allocated_buffer(&frames[i].cameraBuffer);	
 		destroy_allocated_buffer(&frames[i].objectdataBuffer);	
+
+		core->gpudevice.destroySampler(frames[i].shadows.sampler, nullptr);
+		core->gpudevice.destroyFramebuffer(frames[i].shadows.framebuffer, nullptr);
+		destroy_allocated_image(&frames[i].shadows.depthImage);
     }
 
     core->gpudevice.destroyFence(uploadFence, nullptr);
@@ -1811,10 +1916,13 @@ MainEngine::MainEngine(uint32_t WIDTH, uint32_t HEIGHT){
 
 	CreateDescriptorSets();
 	CreateSyncObjects();
-
+	std::cout << "graphics pipeline" << std::endl;
 	CreateGraphicsPipeline();
+	std::cout << "shadow map stuff" << std::endl;
 	CreateShadowmap();
 
 	initial();
+
+	std::cout << "done" << std::endl;
 
 }

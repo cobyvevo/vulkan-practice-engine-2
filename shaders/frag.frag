@@ -6,10 +6,14 @@ layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec2 uvCoord;
 layout(location = 2) in vec3 fragNormal;
 
+layout(set = 0, binding = 1) uniform sampler2D shaderdepth;
 layout(set = 1, binding = 0) uniform sampler2D tex;
 
 void main() {
 	vec3 color = texture(tex,uvCoord).xyz;
+
+	vec2 b = vec2(0,0);
+	float test = texture(shaderdepth,b).r;
 	//outColor = (vec4(uvCoord,0.5,1.0) * 0.5) + (vec4(color,1.0)*0.5); //usually ambient isnt here
 	
 	//outColor = vec4((fragNormal/2) + vec3(0.5,0.5,0.5),1.0);   display normals

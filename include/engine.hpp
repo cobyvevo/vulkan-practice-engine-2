@@ -85,6 +85,7 @@ struct WorldData {
 struct ShadowMapper {
 	vk::Extent3D extent;
 	AllocatedImage depthImage;
+	vk::Sampler sampler;
 	vk::Framebuffer framebuffer;
 };
 
